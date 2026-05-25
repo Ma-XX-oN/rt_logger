@@ -1,0 +1,41 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "clang64-debug-ubsan",
+      "displayName": "CLANG64 Debug UBSan",
+      "description": "Configure with MSYS2 CLANG64 Clang, Ninja, GoogleTest, and UBSan.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "C:/msys64/clang64/bin/clang++.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/msys64/clang64/bin/ninja.exe",
+        "DNUM_ENABLE_UBSAN": "ON"
+      },
+      "environment": {
+        "PATH": "C:/msys64/clang64/bin;$penv{PATH}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "clang64-debug-ubsan-build",
+      "displayName": "Build CLANG64 Debug UBSan",
+      "configurePreset": "clang64-debug-ubsan"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "clang64-debug-ubsan-test",
+      "displayName": "Test CLANG64 Debug UBSan",
+      "configurePreset": "clang64-debug-ubsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "PATH": "C:/msys64/clang64/bin;$penv{PATH}"
+      }
+    }
+  ]
+}
