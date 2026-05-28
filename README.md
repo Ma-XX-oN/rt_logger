@@ -5,17 +5,22 @@
   - [Fast](#fast)
   - [Resilient](#resilient)
 - [Dependencies to build](#dependencies-to-build)
+- [VS Code Configuration](#vs-code-configuration)
 - [Design](#design)
+  - [Type Definitions](#type-definitions)
+    - [Dynamic Integers (dint)](#dynamic-integers-dint)
+    - [C-String](#c-string)
+      - [Ensuring Generated FString CRCs Are Unique](#ensuring-generated-fstring-crcs-are-unique)
   - [Packet Design](#packet-design)
-    - [Dynamic Numbers (dnum)](#dynamic-numbers-dnum)
-    - [C-String Definition](#c-string-definition)
     - [General Block Format](#general-block-format)
+      - [Field 2](#field-2)
     - [Payload specifications](#payload-specifications)
       - [1. StringBlock Payload](#1-stringblock-payload)
       - [2. EnumBlock Payload](#2-enumblock-payload)
       - [3. DataBlock Payload](#3-datablock-payload)
       - [4. TimeAnchorBlock Payload](#4-timeanchorblock-payload)
       - [5. DropCountBlock Payload](#5-dropcountblock-payload)
+      - [6. Test Pattern](#6-test-pattern)
 
 ## Purpose
 
@@ -29,13 +34,19 @@ I'm hoping to have minimal code binary overhead from the logger.
 
 ### Fast
 
-The logger writes the string formatting sparingly, by stating the string and an id that represents it once before use and occasionally in case of data corruption.
+The logger writes the string formatting sparingly, by stating the string and an
+id that represents it once before use and occasionally in case of data
+corruption.
 
-All parameters are to be stored in the logger machine's binary format.  (May have a test pattern block to help automate reconstruction).  The reduces conversion to sting overhead.
+All parameters are to be stored in the logger machine's binary format.  (May
+have a test pattern block to help automate reconstruction).  This reduces
+conversion-to-string overhead.
 
 ### Resilient
 
-The data is in a binary format, so there are fences and CRCs to help with recovery.  If data crosses blocks, the CRC's seed starts where the previous block leaves off.
+The data is in a binary format, so there are fences and CRCs to help with
+recovery.  If data crosses blocks, the CRC's seed starts where the previous
+block leaves off.
 
 ## Dependencies to build
 
@@ -47,32 +58,60 @@ pacman -S \
   mingw-w64-clang-x86_64-gtest
 ```
 
+## VS Code Configuration
+
+This repo keeps the build truth in `CMakeLists.txt` and `CMakePresets.json`.
+That includes the CLANG64 toolchain, the test targets, and exporting
+`build-clang/compile_commands.json` for editor tooling.
+
+`.vscode/settings.json` is only the editor-side consumer of that build data. It
+points the C/C++ extension at the CLANG64 compiler, the CMake Tools provider,
+and `build-clang/compile_commands.json` so IntelliSense uses the same context
+as the real build.
+
+If IntelliSense starts showing bogus include or language-mode errors, refresh
+the build metadata with:
+
+```bash
+cmake --preset clang64-debug-ubsan -D DINT_BUILD_TESTS=ON
+```
+
+If VS Code still shows stale squiggles after that, reload the window or run
+`C/C++: Reset IntelliSense Database`.
+
 ## Design
 
-### Packet Design
+### Type Definitions
 
-The data is stored in packets with a maximum payload of 256 (I don't see any use
-for an empty packet).  I may make this configurable, but will start with 256
-byte payload.
+#### Dynamic Integers (dint)
 
-> **UPDATE:**
->
-> Given my current packet definitions, the minimum payload is 5.  The makes for
-> 5-260 bytes per packet.  4 extra bytes doesn't sound like a lot, but it might
-> be useful.
+A dynamic integer is a sequence of consecutive 8 bit bytes where the most
+significant bit is the continuation flag. If that bit is set, another dint byte
+follows. If it is clear, the current byte is the last byte in the integer
+sequence. The remaining 7 bits carry payload.
 
-#### Dynamic Numbers (dnum)
+Unsigned values are stored in 7-bit chunks starting from the least significant
+bits. That means small unsigned values fit in a single byte, and larger values
+grow by one byte for each additional 7 bits of payload they need.
 
-A dynamic number is a sequence of consecutive 8 bit bytes where the most
-significant is the continuation flag.  If set, then it is left shifted 7 bit and
-the next 7 bits are ORed onto the shifted one.  This keeps happening until the
-continuation flag is clear.
+Signed values use the same 7-bit chunking, but the most significant payload
+chunk also carries the sign in bit `0x40`. Negative values are first bitwise
+inverted, then encoded as payload, and finally marked negative by setting that
+sign bit in the most significant chunk. During decode, the payload is
+reconstructed first, the sign bit in the terminal chunk is checked, and if the
+value was marked negative the bits are inverted.
 
-This makes 1 byte hold 128 values, 2 bytes can hold 16k values and so on.  This
-is a very fast and effective compression scheme if most of the values expected
-are to be lov values.
+There is one extra signed case. If the most significant payload chunk already
+needs bit `0x40` as data, that chunk cannot also store the sign. When that
+happens, the encoder marks that byte as a continuation byte and appends one
+extra terminal byte whose only job is to carry the sign. This keeps the
+encoding unambiguous while still keeping small signed values compact.
 
-#### C-String Definition
+In practice, this means dints are a compact representation for values that are
+usually small, while still allowing larger integers to grow naturally in 7-bit
+steps instead of always paying the full fixed-width storage cost.
+
+#### C-String
 
 The characters in non-format c-strings are just NUL terminated character
 streams.
@@ -109,15 +148,15 @@ There are 3 different control sequences.
 
    2. Enum
 
-      Enums are followed by a dnum (dynamic number) to specify which registered
-      enum to use.  A dnum is a 7 bit number with a continuation bit to allow a
+      Enums are followed by a dint (dynamic integer) to specify which registered
+      enum to use.  A dint is a 7 bit number with a continuation bit to allow a
       number to be as small as 1 byte for small numbers but can be theoretically
       represent any sized number.
 
    3. Array
 
       All of those described previously can be prefixed with an Array MODIFIER.
-      That consists of Array, followed by a dnum and can be stacked 3 levels
+      That consists of Array, followed by a dint and can be stacked 3 levels
       deep. That limitation only exists is only because I'm not sure how to
       represent 4D arrays on output.
 
@@ -126,13 +165,15 @@ There are 3 different control sequences.
    The formatting info consists of 1-6 bytes (2-12 if using arrays), depending
    on what is requested. This excludes the starting eType byte.  A sequence
    always ends with a eFmtLetter byte.  Sizes stated are minimal values.  If
-   embedded dnums specified are greater than 127, then it could mean a larger
-   size.  Embedded dnums of 0 are considered an error.  If done as text, it
+   embedded dints specified are greater than 127, then it could mean a larger
+   size.  Embedded dints of 0 are considered an error.  If done as text, it
    would easily be twice the size.
 
-                11111             111111111122222
-       12345678901234    123456789012345678901234 // Arrays are deduced, not
-       {:0^+z#10.10b}    {:0^+z#10.10!a10a10a10d} // specified as shown here.
+   ```cpp
+            11111             111111111122222
+   12345678901234    123456789012345678901234 // Arrays are deduced, not
+   {:0^+z#10.10b}    {:0^+z#10.10!a10a10a10d} // specified as shown here.
+   ```
 
    When arrays are displayed, they are space delimited when minimum width
    formatting is specified, otherwise is it comma delimited.  This is actually
@@ -143,17 +184,17 @@ There are 3 different control sequences.
    |-----------|------------|----------|------------|------------|------------|------------|
    | eType     | eFmtLetter |          |            |            |            |            |
    | eType     | eFmt0      | eFmt1    | eFmtLetter |            |            |            |
-   | eType     | eFmt0      | eFmt1    | MIN_DNUM   | eFmtLetter |            |            |
-   | eType     | eFmt0      | eFmt1    | PREC_DNUM  | eFmtLetter |            |            |
-   | eType     | eFmt0      | eFmt1    | MIN_DNUM   | PREC_DNUM  | eFmtLetter |            |
+   | eType     | eFmt0      | eFmt1    | MIN_DINT   | eFmtLetter |            |            |
+   | eType     | eFmt0      | eFmt1    | PREC_DINT  | eFmtLetter |            |            |
+   | eType     | eFmt0      | eFmt1    | MIN_DINT   | PREC_DINT  | eFmtLetter |            |
    | eType     | eFmt0      | eFmt1    | FILL_CHAR  | eFmtLetter |            |            |
-   | eType     | eFmt0      | eFmt1    | MIN_DNUM   | FILL_CHAR  | eFmtLetter |            |
-   | eType     | eFmt0      | eFmt1    | PREC_DNUM  | FILL_CHAR  | eFmtLetter |            |
-   | eType     | eFmt0      | eFmt1    | MIN_DNUM   | PREC_DNUM  | FILL_CHAR  | eFmtLetter |
+   | eType     | eFmt0      | eFmt1    | MIN_DINT   | FILL_CHAR  | eFmtLetter |            |
+   | eType     | eFmt0      | eFmt1    | PREC_DINT  | FILL_CHAR  | eFmtLetter |            |
+   | eType     | eFmt0      | eFmt1    | MIN_DINT   | PREC_DINT  | FILL_CHAR  | eFmtLetter |
    | Enum      | enum id    | ...      |            |            |            |            |
-   | Array     | DNUM_SIZE  | eType ...|            |            |            |            |
-   | Array     | DNUM_SIZE  | Array    | DNUM_SIZE  | eType ...  |            |            |
-   | Array     | DNUM_SIZE  | Array    | DNUM_SIZE  | Array      | DNUM_SIZE  | eType ...  |
+   | Array     | DINT_SIZE  | eType ...|            |            |            |            |
+   | Array     | DINT_SIZE  | Array    | DINT_SIZE  | eType ...  |            |            |
+   | Array     | DINT_SIZE  | Array    | DINT_SIZE  | Array      | DINT_SIZE  | eType ...  |
    ```
 
 3. End of an fstring
@@ -165,11 +206,11 @@ There are 3 different control sequences.
       All fstrings have a CRC16 with them to distinguish them from each other.
       If an fstring has the same CRC16 as another, it is considered an error and
       can be forced to be made different by adding a salt to the end of the
-      string, which is the Salt value followed by nothing or a dnum THAT IS NOT
+      string, which is the Salt value followed by nothing or a dint THAT IS NOT
       ZERO.
 
-      This adds one or more bytes to the string. A DNUM_SALT value of 0 is an
-      error, but it's equivalent is to have no DNUM_SALT at all.  A dnum is used
+      This adds one or more bytes to the string. A DINT_SALT value of 0 is an
+      error, but it's equivalent is to have no DINT_SALT at all.  A dint is used
       to ensure that the salt is always part of the fstring and doesn't
       prematurely terminate it with an inadvertent NUL. The salt shouldn't be
       printed on the displaying end.
@@ -179,8 +220,122 @@ There are 3 different control sequences.
       |-----------|---------------|----------|
       | NUL       |               |          |
       | Salt      | NUL           |          |
-      | Salt      | DNUM_SALT     | NUL      |
+      | Salt      | DINT_SALT     | NUL      |
       ```
+
+##### Ensuring Generated FString CRCs Are Unique
+
+To ensure that all FStrings generate a unique CRC, run the compiler on each
+source file in preprocess-only mode.  Just call compiler with `-DSOURCE_FILE
+<source_file>` on the following code to do the first pass.  Append all of these
+together.
+
+```cpp
+
+#define FIRST_ARG_(first, ...) first
+#define FIRST_ARG(...) FIRST_ARG_(__VA_ARGS__, unused)
+
+// Override the default RTLOG macro to do a transform to make it easier to
+// extract all of the rt logs.  That way the preprocessor does the heavy lifting
+// on first pass.
+#define RTLOG_INFO(...)  RTLOG(__FILE__, __LINE__, info,  FIRST_ARG(__VA_ARGS__))
+#define RTLOG_DEBUG(...) RTLOG(__FILE__, __LINE__, debug, FIRST_ARG(__VA_ARGS__))
+#define RTLOG_WARN(...)  RTLOG(__FILE__, __LINE__, warn,  FIRST_ARG(__VA_ARGS__))
+#define RTLOG_ERROR(...) RTLOG(__FILE__, __LINE__, error, FIRST_ARG(__VA_ARGS__))
+
+#include SOURCE_FILE
+```
+
+Then filter using:
+
+```bash
+sed -E -n 's/^[ \t]*(RTLOG\(.*)/\1/p' \
+  | LC_ALL=C sort -u \
+  | sed -E -n 'h; s/^RTLOG\([ \t]*("[^"]*"),[ \t]*([0-9]+),.*/#line \2 \1/p; x; p'
+```
+
+That does:
+
+1. Remove all text other than the log entries.
+2. Remove any duplicates caused by including the same header that logs.
+3. Add `#line` entries before each line.
+
+Then do a second compile with `-DCONCAT_SOURCE_FILES <concat_source_files>` on
+the resulting file.
+
+```cpp
+#include <cstdint>
+
+enum severity {
+  info,
+  debug,
+  warn,
+  error,
+};
+
+constexpr std::uint16_t crc16(char const* s) {
+  std::uint16_t h = 0;
+
+  for (; *s; ++s) {
+    h = std::uint16_t(
+      h * 131u + static_cast<unsigned char>(*s)
+    );
+  }
+
+  return h;
+}
+
+constexpr std::uint16_t gen_crc(severity sev, char const* s) {
+  return std::uint16_t(
+    crc16(s) ^ (static_cast<unsigned>(sev) << 8)
+  );
+}
+
+#define STRINGIZE_(val) #val
+#define STRINGIZE(val) STRINGIZE_(val)
+
+#define RTLOG(file, line, severity, ...) \
+  case gen_crc(severity, file ":" STRINGIZE(line) ": " __VA_ARGS__):
+
+void verify_log_crc_uniqueness() {
+  switch (0) {
+
+#include CONCAT_SOURCE_FILES
+
+  }
+}
+```
+
+Voila!  Should now give a compile time error showing where the CRC are the same.
+
+> **NOTE:**
+>
+> This will not work with raw string literals that are multiline.  E.g.  The
+> following will not properly work.
+>
+> ```cpp
+> RTLOG_DEBUG( R"(Line 1
+> Line 2)" );
+> ```
+>
+> Do this instead:
+>
+> ```cpp
+> RTLOG_DEBUG( "Line 1\n"
+> "Line 2" );
+> ```
+
+### Packet Design
+
+The data is stored in packets with a maximum payload of 256 (I don't see any use
+for an empty packet).  I may make this configurable, but will start with 256
+byte payload.
+
+> **UPDATE:**
+>
+> Given my current packet definitions, the minimum payload is 5.  That makes for
+> 5-260 bytes per packet.  4 extra bytes doesn't sound like a lot, but it might
+> be useful.
 
 #### General Block Format
 
@@ -188,16 +343,18 @@ There are 3 different control sequences.
 |------:|------:|--------------------------------------------------------------------------------|
 | 1     | 1     | Block type: StringBlock, EnumBlock, DataBlock, TimeAnchorBlock, DropCountBlock |
 | 2     | 1     | Sequence number (6 bit), and two flags (continuation and continues).           |
-| 4     | 1     | payload length-5:  minimum payload is 5, so 5-260 bytes are possible.          |
-| 5     | 5-260 | payload                                                                        |
-| 6     | 2     | CRC16: Should be good enough for 256 byte + 4 byte header blocks.              |
-| 7     | 4     | Fence: "####"                                                                  |
+| 3     | 1     | payload length-5:  minimum payload is 5, so 5-260 bytes are possible.          |
+| 4     | 5-260 | payload                                                                        |
+| 5     | 2     | CRC16: Should be good enough for 256 byte + 4 byte header blocks.              |
+| 6     | 4     | Fence: "####"                                                                  |
 
-Fields 1-4 are the header, 5 is the payload, 6 is the CRC and 7 ends the block.
+Fields 1-3 are the header, 4 is the payload, 5 is the CRC and 6 ends the block.
 
 The fence is at the end because a block isn't finished unless a fence is found.
 Before the first block is emitted, there will have an explicit fence to start
 the blocks off.
+
+##### Field 2
 
 The 6-bit sequence number detects short discontinuities. It is not intended to
 count long loss intervals.
@@ -208,7 +365,7 @@ count long loss intervals.
 | 2     | 6     | Block continues.              |
 | 3     | 7     | Block is continuing.          |
 
-The CRC is based on fields 1-5.
+The CRC is based on fields 1-4.
 
 A continued block's CRC is seeded by the previous block's CRC.
 
@@ -226,7 +383,7 @@ Contains 1 or more strings, with IDs and CRC16 for each.
 | repeats | field | bytes    | description                                 |
 |:-------:|------:|---------:|---------------------------------------------|
 |         | 1     | 1        | Count of strings in block.                  |
-|   ✅    | 2     | variable | String ID (dynamic number).                 |
+|   ✅    | 2     | variable | String ID (dint).                           |
 |   ✅    | 3     | 1        | Severity (Info, Warn, Error, Debug)         |
 |   ✅    | 4     | variable | NUL terminated format string (c-string)     |
 |   ✅    | 5     | 2        | The CRC for the severity and string (CRC16) |
@@ -244,34 +401,171 @@ enum eEnumStorageType : std::uint8_t {
   // Integer types
    Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
   UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
+
+  // states how inline_bit_mask, active_bit_mask and enum_value are stored
+  UsingDints = 0x08,
 };
 ```
 
-| repeats | field | bytes    | description                             |
-|:-------:|------:|---------:|-----------------------------------------|
-|         | 1     | variable | Enum ID (dynamic number)                |
-|         | 2     | 1        | Storage type (eEnumStorageType)         |
-|         | 3     | 1        | Count of number masks                   |
-|   ✅    | 4     | variable | Mask (could be sizeof storage or dnum)  |
-|         | 5     | variable | Count of named masks                    |
-|   ✅    | 6     | variable | Mask (could be sizeof storage or dnum)  |
-|         | 7     | variable | Count of enums values encoded (dnum)    |
-|   ✅    | 8     | variable | Value (could be sizeof storage or dnum) |
-|   ✅    | 9     | variable | String for that value (c-string)        |
+| field | bytes     | description                                        |
+|------:|----------:|----------------------------------------------------|
+|  1    | variable  | Enum ID (dint)                                     |
+|  2    | 1         | Underlying enum storage type (eEnumStorageType)    |
+|  3    | variable  | Enum definition bytecode stream                    |
 
-Number mask means that area is to be thought of as a number.  Possible
-formatting strategies:
+The enum definition stream consists of a sequence of commands:
 
-- Display as stated.
-- Right shift value of bits to least significant bit and report that value.
-- If not contiguous make them contiguous.
+```c++
+[ cmd_byte, command_payload... ]
+```
 
-May specify formatting options for this and put it in the eEnumStorageType.
+Where:
 
-Named masks means that if a mask is applied and it gives a non-zero value, find
-value based on that value and output the string for that value.
+```c++
+opcode  = cmd_byte & OpcodeMask;
+payload = cmd_byte & PayloadMask;
+```
 
-Mask and value are stored as unsigned dnums unless they are a byte in size.
+Depending on the opcode and `active_bit_mask` state, the command payload may
+contain:
+
+- inline bit masks
+- name
+- formatting flags
+- `(enum_value, name)` pairs
+- nested child commands
+
+Commands that specify a count contain that many subcommands or pairs that relate
+to that command after it.
+
+Names are just c-strings (character bytes sequences ending in a NUL).
+
+The enum definition stream is interpreted using the following command set:
+
+```c++
+enum eDefineEnum : std::uint8_t {
+  // MASKS
+  //
+  // Partitions the bit space
+  OpcodeMask      = 0b1110'0000, // Mask for extracting opcode.
+
+  PayloadMask     = 0b0001'1111, // Op-code specific payload.
+  
+  // INTERPRETATION OF OPCODE
+  
+  Invalid         = 0b0000'0000, // Catches zero/uninitialized/corrupt command bytes.
+  
+  Named           = 0b0010'0000, // extracted = ((active_bit_mask ? active_bit_mask : inline_bit_mask) & value);
+                                 // pair_count = (PayloadMask & cmd_byte) + 1;
+                                 // - Followed by pair_count pairs.
+                                 // - To specify more than 32 names, just create another Named command on the same
+                                 //   level.
+                                 //
+                                 // for (int i = 0; i < pair_count; ++i) {
+                                 //   if (extracted == std::get<0>(pair)) {
+                                 //     auto const& Name = std::get<1>(pair);
+                                 //     if (extracted) {
+                                 //       // add to non-zero value queue.  Allows display grouping as "A | Name".
+                                 //     } else {
+                                 //       // add to zero value queue.  Allows display grouping as "A, Name"
+                                 //     }
+                                 //     break;
+                                 //   }
+                                 // }
+                                 
+  Numeric         = 0b0100'0000, // extracted = (inline_bit_mask & value);
+                                 // format = PayloadMask & cmd_byte;
+                                 //   - Followed by a name to name the field.
+                                 //   - Does NOT use active_bit_mask as that would add additional overhead as mask would
+                                 //     be used only once.
+                                 //   - If there is a 0 in the inline_bit_mask's least significant bit, keep shifting
+                                 //     value and mask right till it's a 1.
+                                 //   - Bits are packed densely into the low bits in least-significant-bit order.
+                                 //   - After packing, the most significant extracted bit becomes the sign bit and is
+                                 //     sign extended.
+                                 //   - format can contain up to 5 independent formatting rules.
+                                 //
+                                 //   formatted_value = format_value(extracted, format);
+                                 //   // add (name, value) pair to numeric queue.
+                                 //   // Allows display grouping as "A, Name = Value"
+
+  // CONDITIONALS
+  //
+  // Can specify that a bit represents how other bits are interpreted.  If a particular bit sequence requires a
+  // different representation, nest the groups.  This is slightly clunky, but optimizes the stream size for the more
+  // common cases.
+
+  GroupIf         = 0b0110'0000, // select_group = (inline_bit_mask & value);
+                                 // cmd_count = (PayloadMask & cmd_byte) + 1;
+                                 // if ( select_group) {
+                                 //   // Execute the following cmd_count commands.
+                                 // } else {
+                                 //   // Advance past cmd_count commands without executing them.
+                                 // }
+                                 
+  GroupIfNot      = 0b1000'0000, // select_group = (inline_bit_mask & value);
+                                 // cmd_count = (PayloadMask & cmd_byte) + 1;
+                                 // if (!select_group) {
+                                 //   // Execute the following cmd_count commands.
+                                 // } else {
+                                 //   // Advance past cmd_count commands without executing them.
+                                 // }
+  
+  // COMBINED CONDITIONALS
+  //
+  // Though not explicitly required, these micro-optimize the resulting stream length.
+  
+  GroupIfNamed    = 0b1010'0000, // extracted = ((active_bit_mask ? active_bit_mask : inline_bit_mask) & value);
+                                 // select_group = (inline_bit_mask & value);
+                                 // pair_count = (PayloadMask & cmd_byte) + 1;
+                                 // if ( select_group) {
+                                 //   // Compare extracted against pair_count pairs as specified for Named.
+                                 // } else {
+                                 //   // Advance past pair_count pairs without checking them.
+                                 // }
+
+  GroupIfNotNamed = 0b1100'0000, // extracted = ((active_bit_mask ? active_bit_mask : inline_bit_mask) & value);
+                                 // select_group = (inline_bit_mask & value);
+                                 // pair_count = (PayloadMask & cmd_byte) + 1;
+                                 // if (!select_group) {
+                                 //   // Compare extracted against pair_count pairs as specified for Named.
+                                 // } else {
+                                 //   // Advance past pair_count pairs without checking them.
+                                 // }
+
+  SetMask         = 0b1110'0000, // Sets active_bit_mask.
+                                 // - Followed by active_bit_mask value.
+                                 //
+                                 // active_bit_mask is initially 0.
+                                 //
+                                 // When entering a GroupIf/GroupIfNot body, active_bit_mask is pushed onto a stack and
+                                 // restored when leaving the scope.
+                                 //
+                                 // This changes the number of the opcode's parameters that are expected:
+                                 //
+                                 //  | opcode \ abm == 0 | true  | false |
+                                 //  |-------------------|-------|-------|
+                                 //  | Named             |   1   |   0   |
+                                 //  | Numeric           |   1   |   1   |
+                                 //  | GroupIf           |   1   |   1   |
+                                 //  | GroupIfNot        |   1   |   1   |
+                                 //  | GroupIfNamed      |   1   |   0   |
+                                 //  | GroupIfNotNamed   |   1   |   0   |
+                                 //
+                                 // Numeric, GroupIf and GroupIfNot always have an independent parameter.
+                                 //
+                                 // abm = active_bit_mask
+};
+```
+
+`Invalid` is opcode 0.  It is never a valid command.  In length specified
+streams, `Invalid` is an error. In non-length specified streams, `Invalid`
+terminates the command stream. In the case of the **EnumBlock**, we're using the
+length specified stream.
+
+To compress further, `inline_bit_mask`, `active_bit_mask` and `enum_value`
+values can be represented as dint types.  To get the best compression, place
+larger groups of bit patterns in the most significant area of the enum value.
 
 ##### 3. DataBlock Payload
 
@@ -281,7 +575,7 @@ This is the actual logged data.
 |------:|---------:|--------------------------------------------|
 | 1     | 2        | Timestamp (offset from TimeAnchorBlock)    |
 | 2     | 2        | Event count (rolls over every 64k events)  |
-| 3     | variable | String ID (dnum)                           |
+| 3     | variable | String ID (dint)                           |
 | 4     | variable | Arguments (binary payload based on string) |
 
 There is only one event per block.
@@ -315,3 +609,49 @@ This packet will be periodically be output if there are any dropped packets.
 | 2     | 4        | Number of dropped info events.             |
 | 3     | 4        | Number of dropped warning events.          |
 | 4     | 4        | Number of dropped error events.            |
+
+##### 6. Test Pattern
+
+This specifies the basic information needed to identify the binary
+representation used by the logging machine.
+
+All integers are 2s complement and must be 1, 2, 4 or 8 bytes long.  Enums must
+be based on those representation.  Attempting to log anything else will result
+in a compile time error.
+
+By definition of this library, `CHAR_BIT` must equal 8, making chars equal to
+bytes.
+
+> To think about:
+>
+> Not sure about NaN.  This could be useful or not.  Might instead have float
+> and double and long double use an enum to specify a particular standard
+> representation.
+
+| field | bytes      | description                                       |
+|------:|-----------:|---------------------------------------------------|
+| 1     | 2          | Int16                       (0x0201)              |
+| 1     | 4          | Int32                   (0x04030201)              |
+| 1     | 8          | Int64           (0x0807060504030201)              |
+| 1     | 1          | float                (sizeof(float))              |
+| 1     | sizeof(f)  | float                   (positive 0)              |
+| 1     | sizeof(f)  | float                   (negative 0)              |
+| 1     | sizeof(f)  | float                   (positive ∞)              |
+| 1     | sizeof(f)  | float                   (negative ∞)              |
+| 1     | sizeof(f)  | float                 (not a number)              |
+| 1     | sizeof(f)  | float                          (1e7)              |
+| 1     | 1          | double              (sizeof(double))              |
+| 1     | sizeof(d)  | double                  (positive 0)              |
+| 1     | sizeof(d)  | double                  (negative 0)              |
+| 1     | sizeof(d)  | double                  (positive ∞)              |
+| 1     | sizeof(d)  | double                  (negative ∞)              |
+| 1     | sizeof(d)  | double                (not a number)              |
+| 1     | sizeof(d)  | double                         (1e7)              |
+| 1     | 1          | Has long double test block (0/1)                  |
+| 1     | 1          | long double    (sizeof(long double)) **optional** |
+| 1     | sizeof(ld) | long double             (positive 0) **optional** |
+| 1     | sizeof(ld) | long double             (negative 0) **optional** |
+| 1     | sizeof(ld) | long double             (positive ∞) **optional** |
+| 1     | sizeof(ld) | long double             (negative ∞) **optional** |
+| 1     | sizeof(ld) | long double           (not a number) **optional** |
+| 1     | sizeof(ld) | long double                    (1e7) **optional** |
