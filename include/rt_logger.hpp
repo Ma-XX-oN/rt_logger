@@ -1,3 +1,19 @@
+/**
+ * @file logger.hpp
+ * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
+ * @brief Logger that minimises CPU usage and data stream size.
+ * @version 0.1
+ * @date 2026-05-28
+ *
+ * @copyright Copyright (c) 2026
+ *
+ * This logger stores format strings as IDs and when printing an event, states
+ * ID for format and the parameters as binary data, thus reducing the size of
+ * the data stream and the amount of CPU to encode it.
+ *
+ * TODO: Flesh out specification.
+ */
+
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +23,7 @@
 #include <stdexcept>
 #include <tuple>
 #include "include/machine_num.hpp"
-#include "include/dynamic_num.hpp"
+#include "include/dynamic_int.hpp"
 #include "include/bitwise_enum.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -54,16 +70,16 @@ class Block {
   // Because the length has to point at the next fence, it's better to put
   // the fence at the end every time and only put the first fence down once.
   // static constexpr int I_FENCE       = 0;
-  static constexpr int I_CRC         = 0; // 16 bit CRC
-  static constexpr int I_BLOCK_TYPE  = 2; // Type of block
-  static constexpr int I_SEQ_NUM     = 3; // Sequence number
-  static constexpr int I_PAYLOAD_LEN = 4; // Payload contains this number of bytes
-  static constexpr int I_PAYLOAD     = 5; // Payload starts here
-  static constexpr int HEADER_SIZE   = 9; // Header is technically still 9 bytes
+  static constexpr int I_CRC        { 0 }; // 16 bit CRC
+  static constexpr int I_BLOCK_TYPE { 2 }; // Type of block
+  static constexpr int I_SEQ_NUM    { 3 }; // Sequence number
+  static constexpr int I_PAYLOAD_LEN{ 4 }; // Payload contains this number of bytes
+  static constexpr int I_PAYLOAD    { 5 }; // Payload starts here
+  static constexpr int HEADER_SIZE  { 9 }; // Header is technically still 9 bytes
                                           // it's just that it's using the fence
                                           // from the previous block or the
                                           // initial fence.
-  static constexpr int MAX_PAYLOAD   = 1 << 8;
+  static constexpr int MAX_PAYLOAD{ 1 << 8 };
 
   std::byte bytes[MAX_PAYLOAD + HEADER_SIZE];
 
@@ -172,10 +188,10 @@ template <std::size_t N>
 class BlockManager {
   public:
   
-  uint8_t next_sequence_number = 0;
+  uint8_t next_sequence_number{ 0 };
   Block buffers[N];
   Block* pHead;
-  int in_use = 0;
+  int in_use{ 0 };
   
   BlockManager()
   : pHead(buffers)
@@ -193,7 +209,7 @@ class BlockManager {
   Block& next() {
     assert(!is_full());
     ++in_use;
-    Block* result = pHead;
+    Block* result{ pHead };
     if (++pHead >= buffers + N) {
       pHead = buffers;
     }
@@ -217,7 +233,7 @@ template <char...Cs>
 struct is_char_seq<std::integer_sequence<char, Cs...>> : std::true_type {};
 
 template <typename T>
-constexpr bool is_char_seq_v = is_char_seq<T>::value;
+constexpr bool is_char_seq_v{ is_char_seq<T>::value };
 
 /**
  * @brief These are control codes stored in a fstring (format string) to specify
@@ -257,15 +273,15 @@ constexpr bool is_char_seq_v = is_char_seq<T>::value;
  *
  * 1b. TYPE_SPEC: \c Enum
  *
- * Enums are followed by a \c dnum (dynamic number) to specify which registered
- * enum to use.  A \c dnum is a 7 bit number with a continuation bit to allow a
+ * Enums are followed by a \c dint (dynamic integer) to specify which registered
+ * enum to use.  A \c dint is a 7 bit number with a continuation bit to allow a
  * number to be as small as 1 byte for small numbers but can be theoretically
  * represent any sized number.
  *
  * 1c. TYPE_SPEC: \c Array
  *
  * All of those described previously can be prefixed with an \c Array MODIFIER.
- * That consists of \c Array, followed by a \c dnum and can be stacked 3 levels
+ * That consists of \c Array, followed by a \c dint and can be stacked 3 levels
  * deep.  That limitation only exists is only because I'm not sure how to
  * represent 4D arrays on output.
  *
@@ -274,8 +290,8 @@ constexpr bool is_char_seq_v = is_char_seq<T>::value;
  * The formatting info consists of 1-6 bytes (2-12 if using arrays), depending
  * on what is requested. This excludes the starting \c eType byte.  A sequence
  * always ends with a \c eFmtLetter byte.  Sizes stated are minimal values.  If
- * embedded dnums specified are greater than 127, then it could mean a larger
- * size.  Embedded dnums of 0 are considered an error.  If done as text, it
+ * embedded dints specified are greater than 127, then it could mean a larger
+ * size.  Embedded dints of 0 are considered an error.  If done as text, it
  * would easily be twice the size. 
  *
  *              11111             111111111122222
@@ -291,17 +307,17 @@ constexpr bool is_char_seq_v = is_char_seq<T>::value;
  * |-----------|------------|----------|------------|------------|------------|------------|
  * | eType     | eFmtLetter |          |            |            |            |            |
  * | eType     | eFmt0      | eFmt1    | eFmtLetter |            |            |            |
- * | eType     | eFmt0      | eFmt1    | MIN_DNUM   | eFmtLetter |            |            |
- * | eType     | eFmt0      | eFmt1    | PREC_DNUM  | eFmtLetter |            |            |
- * | eType     | eFmt0      | eFmt1    | MIN_DNUM   | PREC_DNUM  | eFmtLetter |            |
+ * | eType     | eFmt0      | eFmt1    | MIN_DINT   | eFmtLetter |            |            |
+ * | eType     | eFmt0      | eFmt1    | PREC_DINT  | eFmtLetter |            |            |
+ * | eType     | eFmt0      | eFmt1    | MIN_DINT   | PREC_DINT  | eFmtLetter |            |
  * | eType     | eFmt0      | eFmt1    | FILL_CHAR  | eFmtLetter |            |            |
- * | eType     | eFmt0      | eFmt1    | MIN_DNUM   | FILL_CHAR  | eFmtLetter |            |
- * | eType     | eFmt0      | eFmt1    | PREC_DNUM  | FILL_CHAR  | eFmtLetter |            |
- * | eType     | eFmt0      | eFmt1    | MIN_DNUM   | PREC_DNUM  | FILL_CHAR  | eFmtLetter |
+ * | eType     | eFmt0      | eFmt1    | MIN_DINT   | FILL_CHAR  | eFmtLetter |            |
+ * | eType     | eFmt0      | eFmt1    | PREC_DINT  | FILL_CHAR  | eFmtLetter |            |
+ * | eType     | eFmt0      | eFmt1    | MIN_DINT   | PREC_DINT  | FILL_CHAR  | eFmtLetter |
  * | Enum      | enum id    | ...      |            |            |            |            |
- * | Array     | DNUM_SIZE  | eType ...|            |            |            |            |
- * | Array     | DNUM_SIZE  | Array    | DNUM_SIZE  | eType ...  |            |            |
- * | Array     | DNUM_SIZE  | Array    | DNUM_SIZE  | Array      | DNUM_SIZE  | eType ...  |
+ * | Array     | DINT_SIZE  | eType ...|            |            |            |            |
+ * | Array     | DINT_SIZE  | Array    | DINT_SIZE  | eType ...  |            |            |
+ * | Array     | DINT_SIZE  | Array    | DINT_SIZE  | Array      | DINT_SIZE  | eType ...  |
  * ```
  *
  * 2. End of an fstring
@@ -313,10 +329,10 @@ constexpr bool is_char_seq_v = is_char_seq<T>::value;
  * All fstrings have a CRC16 with them to distinguish them from each other.  If
  * an fstring has the same CRC16 as another, it is considered an error and can
  * be forced to be made different by adding a salt to the end of the string,
- * which is the \c Salt value followed by nothing or a dnum THAT IS NOT ZERO.
+ * which is the \c Salt value followed by nothing or a dint THAT IS NOT ZERO.
  *
- * This adds one or more bytes to the string. A DNUM_SALT value of 0 is an
- * error, but it's equivalent is to have no DNUM_SALT at all.  A dnum is used to
+ * This adds one or more bytes to the string. A DINT_SALT value of 0 is an
+ * error, but it's equivalent is to have no DINT_SALT at all.  A dint is used to
  * ensure that the salt is always part of the fstring and doesn't prematurely
  * terminate it with an inadvertent NUL. The salt shouldn't be printed on the
  * displaying end.
@@ -326,35 +342,43 @@ constexpr bool is_char_seq_v = is_char_seq<T>::value;
  * |-----------|---------------|----------|
  * | NUL       |               |          |
  * | Salt      | NUL           |          |
- * | Salt      | DNUM_SALT     | NUL      |
+ * | Salt      | DINT_SALT     | NUL      |
  * ```
  */
 enum eType : uint8_t {
   // TYPE SPEC:
 
-  // Integer types
-   Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
-  UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
+  // Integer types (Reserved is probably for future 128 bit)
+  UInt16 = 0x00, UInt32 = 0x01, UInt64 = 0x02, Reserved0 = 0x03,
+   Int16 = 0x04,  Int32 = 0x05,  Int64 = 0x06, Reserved1 = 0x07,
 
-  Dnum   = 0x08, // bit flag to state if Int*/UInt* are compressed as dnums.
-  NonInt = 0x10, // bit flag to state if not an Int*/UInt*.
+  Dint   = 0x08, // bit flag to state if Int*/UInt* are compressed as dints.
+  NonInt = 0x10, // bit flag to state if not an Int*/UInt* with size > 1.
+  
+  // C-String
+  String = 0x11,
 
   // Not integer types
-  Char  = 0x11, Bool   = 0x12,
-  Float = 0x13, Double = 0x14,
+  Char  = 0x12, Bool   = 0x13,
+  Float = 0x14, Double = 0x15,
 
-  // C-String
-  String = 0x15,
+   Int8 = 0x16,
+  UInt8 = 0x17,
+
+  // 0x18, 0x19, 0x1A, 0x1B - Unused
+  // Maybe long double?
   
-  // Enum has dnum id following it
-  Enum  = 0x16,
+  // TYPE MODIFIES:
+
+  // Enum has dint id following it
+  Enum  = 0x1C,
   
-  // Array has a dnum value and a eType after it to state the number of elements
+  // Array has a dint value and a eType after it to state the number of elements
   // and the type of the array.
   //
   //   E.g. Array 30 Int16        = an array of 30 int16_t elements.
   //   E.g. Array 16 Array 4 Int8 = a 16 x 4 array of int8_t elements.
-  Array = 0x17,
+  Array = 0x1D,
 
   // SALT:
 
@@ -562,15 +586,15 @@ struct enum_id {};
 template<typename T, char...Cs>
 constexpr auto fstr_param_type(char_sequence<Cs...> result = char_sequence<>{}) {
   if constexpr (std::is_array_v<std::remove_reference_t<T>>) {
-    constexpr auto array_size_dnum { encode_dnum(std::size(T{})) };
+    constexpr auto array_size_dint { encode_dint(std::size(T{})) };
     using DT = std::remove_extent_t<T>;
     return fstr_param_type<DT>(append_to_seq(result
-      , append_to_seq<array_size_dnum>(char_sequence<eType::Array>{})));
+      , append_to_seq<array_size_dint>(char_sequence<eType::Array>{})));
   }
   else if constexpr (std::is_enum_v<T>) {
-    constexpr auto enum_id_dnum = encode_dnum(enum_id<T>::value);
+    constexpr auto enum_id_dint{ encode_dint(enum_id<T>::value) };
     return append_to_seq(result
-      , append_to_seq<enum_id_dnum>(char_sequence<eType::Enum>{}));
+      , append_to_seq<enum_id_dint>(char_sequence<eType::Enum>{}));
   }
   // NOTE that if std::int8_t is to be treated as a char, it needs check the
   // format letter to fix it.
@@ -764,4 +788,3 @@ class StringInfo {
   severity: SeverityEnum
   format: str
 }
-
