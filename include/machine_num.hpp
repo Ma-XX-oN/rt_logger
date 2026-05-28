@@ -96,7 +96,7 @@ template <typename T
   , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
 std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t& offset, T const* v_src, std::size_t M) {
   assert(M >= 1);
-  std::size_t length = sizeof(T) * M;
+  std::size_t length{ sizeof(T) * M };
   if (length <= N && offset <= N - length) {
     std::memcpy(b_dst + offset, v_src, length);
     return offset += length;
@@ -122,7 +122,7 @@ std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t& offset, T
 template <typename T
   , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
 std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t&& offset, T const* v_src, std::size_t M) {
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return encode_value(b_dst, N, local, v_src, M);
 }
 
@@ -161,7 +161,7 @@ std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t& offset, T
 template <typename T
   , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
 std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t&& offset, T const& v_src) {
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return encode_value(b_dst, N, local, v_src);
 }
 
@@ -199,7 +199,7 @@ std::size_t encode_value(std::byte (&b_dst)[N], std::size_t& offset, T const& v_
 template <typename T, std::size_t N
   , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
 std::size_t encode_value(std::byte (&b_dst)[N], std::size_t&& offset, T const& v_src) {
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return encode_value(b_dst, N, local, v_src);
 }
 
@@ -227,7 +227,7 @@ template <typename Throws, typename T
   , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
 T& decode_value(std::byte const* b_src, std::size_t N, std::size_t& offset, T* v_dst, std::size_t M) {
   assert(M >= 1);
-  std::size_t length = sizeof(T) * M;
+  std::size_t length{ sizeof(T) * M };
   if (length <= N && offset <= N - length) {
     std::memcpy(v_dst, b_src + offset, length);
     offset += length;
@@ -262,7 +262,7 @@ template <typename Throws, typename T
 T& decode_value(std::byte const* b_src, std::size_t N, std::size_t&& offset, T* v_dst, std::size_t M) {
   static_assert(std::is_same_v<Throws, Throw>
     , "NoThrow requires an lvalue offset to observe errors.");
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return decode_value<Throws>(b_src, N, local, v_dst, M);
 }
 
@@ -307,7 +307,7 @@ template <typename Throws, typename T
 T& decode_value(std::byte const* b_src, std::size_t N, std::size_t&& offset, T& v_dst) {
   static_assert(std::is_same_v<Throws, Throw>
     , "NoThrow requires an lvalue offset to observe errors.");
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return decode_value<Throws>(b_src, N, local, v_dst);
 }
 
@@ -352,7 +352,7 @@ template <typename Throws, typename T, std::size_t N
 T& decode_value(std::byte const (&b_src)[N], std::size_t&& offset, T& v_dst) {
   static_assert(std::is_same_v<Throws, Throw>
     , "NoThrow requires an lvalue offset to observe errors.");
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return decode_value<Throws>(b_src, N, local, v_dst);
 }
 
@@ -394,7 +394,7 @@ template <typename Throws, typename T, std::size_t N
 T decode_value(std::byte const (&b_src)[N], std::size_t&& offset) {
   static_assert(std::is_same_v<Throws, Throw>
     , "NoThrow requires an lvalue offset to observe errors.");
-  std::size_t local = offset;
+  std::size_t local{ offset };
   return decode_value<Throws, T>(b_src, local);
 }
 
