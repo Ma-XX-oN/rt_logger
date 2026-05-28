@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <string_view>
 
-constexpr bool kConstexprDefaultConstructionWorks = []() constexpr {
+constexpr bool kConstexprDefaultConstructionWorks{ []() constexpr {
   Constexpr::CStr str{};
   return str.empty()
     && str.size() == 0u
@@ -16,10 +16,10 @@ constexpr bool kConstexprDefaultConstructionWorks = []() constexpr {
     && str.data()[0] == '\0'
     && str.c_str()[0] == '\0'
     && str.view().empty();
-}();
+}() };
 static_assert(kConstexprDefaultConstructionWorks);
 
-constexpr bool kConstexprLiteralConstructionWorks = []() constexpr {
+constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
   Constexpr::CStr str{"alpha"};
   return !str.empty()
     && str.size() == 5u
@@ -36,10 +36,10 @@ constexpr bool kConstexprLiteralConstructionWorks = []() constexpr {
     && str.view() == std::string_view("alpha")
     && static_cast<std::string_view>(str) == std::string_view("alpha")
     && str.c_str()[5] == '\0';
-}();
+}() };
 static_assert(kConstexprLiteralConstructionWorks);
 
-constexpr bool kConstexprCompareWorks = []() constexpr {
+constexpr bool kConstexprCompareWorks{ []() constexpr {
   Constexpr::CStr alpha{"alpha"};
   Constexpr::CStr beta{"beta"};
   Constexpr::CStr also_alpha{"alpha"};
@@ -52,33 +52,33 @@ constexpr bool kConstexprCompareWorks = []() constexpr {
     && alpha <= also_alpha
     && beta > alpha
     && beta >= alpha;
-}();
+}() };
 static_assert(kConstexprCompareWorks);
 
-constexpr bool kConstexprAtWorks = []() constexpr {
+constexpr bool kConstexprAtWorks{ []() constexpr {
   Constexpr::CStr str{"alpha"};
   return str.at(0) == 'a'
     && str.at(4) == 'a'
     && str.at(5) == '\0';
-}();
+}() };
 static_assert(kConstexprAtWorks);
 
-constexpr bool kConstexprMemberSwapWorks = []() constexpr {
+constexpr bool kConstexprMemberSwapWorks{ []() constexpr {
   Constexpr::CStr lhs{"left"};
   Constexpr::CStr rhs{"right"};
   lhs.swap(rhs);
   return lhs.view() == std::string_view("right")
     && rhs.view() == std::string_view("left");
-}();
+}() };
 static_assert(kConstexprMemberSwapWorks);
 
-constexpr bool kConstexprFreeSwapWorks = []() constexpr {
+constexpr bool kConstexprFreeSwapWorks{ []() constexpr {
   Constexpr::CStr lhs{"one"};
   Constexpr::CStr rhs{"two"};
   swap(lhs, rhs);
   return lhs.view() == std::string_view("two")
     && rhs.view() == std::string_view("one");
-}();
+}() };
 static_assert(kConstexprFreeSwapWorks);
 
 TEST(CStrConstexpr, SupportsCompileTimeEvaluation)

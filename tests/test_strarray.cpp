@@ -7,7 +7,7 @@
 
 using Constexpr::StrArray;
 
-constexpr bool kConstexprDefaultConstructionWorks = []() constexpr {
+constexpr bool kConstexprDefaultConstructionWorks{ []() constexpr {
   StrArray<8> str{};
   return str.empty()
     && str.size() == 0u
@@ -21,10 +21,10 @@ constexpr bool kConstexprDefaultConstructionWorks = []() constexpr {
     && str.data()[0] == '\0'
     && str.c_str()[0] == '\0'
     && str.view().empty();
-}();
+}() };
 static_assert(kConstexprDefaultConstructionWorks);
 
-constexpr bool kConstexprLiteralConstructionWorks = []() constexpr {
+constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
   StrArray<8> str{"alpha"};
   return !str.empty()
     && str.size() == 5u
@@ -43,20 +43,20 @@ constexpr bool kConstexprLiteralConstructionWorks = []() constexpr {
     && str.view() == std::string_view("alpha")
     && static_cast<std::string_view>(str) == std::string_view("alpha")
     && str.c_str()[5] == '\0';
-}();
+}() };
 static_assert(kConstexprLiteralConstructionWorks);
 
-constexpr bool kConstexprCtadWorks = []() constexpr {
+constexpr bool kConstexprCtadWorks{ []() constexpr {
   StrArray str{"hi"};
   return str.size() == 2u
     && str.length() == 2u
     && str.storage_size() == 3u
     && str.capacity() == 2u
     && str.storage_capacity() == 3u;
-}();
+}() };
 static_assert(kConstexprCtadWorks);
 
-constexpr bool kConstexprCompareWorks = []() constexpr {
+constexpr bool kConstexprCompareWorks{ []() constexpr {
   StrArray<8> alpha{"alpha"};
   StrArray<4> bet{"bet"};
   StrArray<6> also_alpha{"alpha"};
@@ -69,20 +69,20 @@ constexpr bool kConstexprCompareWorks = []() constexpr {
     && alpha <= also_alpha
     && bet > alpha
     && bet >= alpha;
-}();
+}() };
 static_assert(kConstexprCompareWorks);
 
-constexpr bool kConstexprAtWorks = []() constexpr {
+constexpr bool kConstexprAtWorks{ []() constexpr {
   StrArray<8> str{"alpha"};
   str.at(1) = 'o';
-  StrArray<8> const& const_str = str;
+  StrArray<8> const& const_str{ str };
   return str.view() == std::string_view("aopha")
     && const_str.at(0) == 'a'
     && const_str.at(5) == '\0';
-}();
+}() };
 static_assert(kConstexprAtWorks);
 
-constexpr bool kConstexprMutationWorks = []() constexpr {
+constexpr bool kConstexprMutationWorks{ []() constexpr {
   StrArray<8> str{"abc"};
   str[1] = 'x';
   str[2] = '\0';
@@ -90,35 +90,35 @@ constexpr bool kConstexprMutationWorks = []() constexpr {
     && str.size() == 2u
     && str.storage_size() == 3u
     && str.back() == 'x';
-}();
+}() };
 static_assert(kConstexprMutationWorks);
 
-constexpr bool kConstexprClearWorks = []() constexpr {
+constexpr bool kConstexprClearWorks{ []() constexpr {
   StrArray<8> str{"clear"};
   str.clear();
   return str.empty()
     && str.size() == 0u
     && str.storage_size() == 1u
     && str.c_str()[0] == '\0';
-}();
+}() };
 static_assert(kConstexprClearWorks);
 
-constexpr bool kConstexprMemberSwapWorks = []() constexpr {
+constexpr bool kConstexprMemberSwapWorks{ []() constexpr {
   StrArray<8> lhs{"left"};
   StrArray<8> rhs{"right"};
   lhs.swap(rhs);
   return lhs.view() == std::string_view("right")
     && rhs.view() == std::string_view("left");
-}();
+}() };
 static_assert(kConstexprMemberSwapWorks);
 
-constexpr bool kConstexprFreeSwapWorks = []() constexpr {
+constexpr bool kConstexprFreeSwapWorks{ []() constexpr {
   StrArray<8> lhs{"one"};
   StrArray<8> rhs{"two"};
   swap(lhs, rhs);
   return lhs.view() == std::string_view("two")
     && rhs.view() == std::string_view("one");
-}();
+}() };
 static_assert(kConstexprFreeSwapWorks);
 
 TEST(StrArrayConstexpr, SupportsCompileTimeEvaluation)
