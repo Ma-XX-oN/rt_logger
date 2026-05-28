@@ -11,15 +11,19 @@
     - [Dynamic Integers (dint)](#dynamic-integers-dint)
     - [C-String](#c-string)
       - [Ensuring Generated FString CRCs Are Unique](#ensuring-generated-fstring-crcs-are-unique)
+    - [Enum Definition Stream](#enum-definition-stream)
   - [Packet Design](#packet-design)
     - [General Block Format](#general-block-format)
-      - [Field 2](#field-2)
+      - [Field 2: Sequence And Continuation Flags](#field-2-sequence-and-continuation-flags)
+      - [Field 3: Payload Length](#field-3-payload-length)
+      - [Field 5: CRC16](#field-5-crc16)
+      - [Field 6: Fence](#field-6-fence)
     - [Payload specifications](#payload-specifications)
-      - [1. StringBlock Payload](#1-stringblock-payload)
-      - [2. EnumBlock Payload](#2-enumblock-payload)
-      - [3. DataBlock Payload](#3-datablock-payload)
-      - [4. TimeAnchorBlock Payload](#4-timeanchorblock-payload)
-      - [5. DropCountBlock Payload](#5-dropcountblock-payload)
+      - [1. String Block Payload](#1-string-block-payload)
+      - [2. Enum Block Payload](#2-enum-block-payload)
+      - [3. Data Block Payload](#3-data-block-payload)
+      - [4. Time Anchor Block Payload](#4-time-anchor-block-payload)
+      - [5. Drop Count Block Payload](#5-drop-count-block-payload)
       - [6. Test Pattern](#6-test-pattern)
 
 ## Purpose
@@ -325,76 +329,7 @@ Voila!  Should now give a compile time error showing where the CRC are the same.
 > "Line 2" );
 > ```
 
-### Packet Design
-
-The data is stored in packets with a maximum payload of 256 (I don't see any use
-for an empty packet).  I may make this configurable, but will start with 256
-byte payload.
-
-> **UPDATE:**
->
-> Given my current packet definitions, the minimum payload is 5.  That makes for
-> 5-260 bytes per packet.  4 extra bytes doesn't sound like a lot, but it might
-> be useful.
-
-#### General Block Format
-
-| field | bytes | description                                                                    |
-|------:|------:|--------------------------------------------------------------------------------|
-| 1     | 1     | Block type: StringBlock, EnumBlock, DataBlock, TimeAnchorBlock, DropCountBlock |
-| 2     | 1     | Sequence number (6 bit), and two flags (continuation and continues).           |
-| 3     | 1     | payload length-5:  minimum payload is 5, so 5-260 bytes are possible.          |
-| 4     | 5-260 | payload                                                                        |
-| 5     | 2     | CRC16: Should be good enough for 256 byte + 4 byte header blocks.              |
-| 6     | 4     | Fence: "####"                                                                  |
-
-Fields 1-3 are the header, 4 is the payload, 5 is the CRC and 6 ends the block.
-
-The fence is at the end because a block isn't finished unless a fence is found.
-Before the first block is emitted, there will have an explicit fence to start
-the blocks off.
-
-##### Field 2
-
-The 6-bit sequence number detects short discontinuities. It is not intended to
-count long loss intervals.
-
-| field | bit   | description                   |
-|------:|------:|-------------------------------|
-| 1     | 0-5   | Sequence number (64 values).  |
-| 2     | 6     | Block continues.              |
-| 3     | 7     | Block is continuing.          |
-
-The CRC is based on fields 1-4.
-
-A continued block's CRC is seeded by the previous block's CRC.
-
-#### Payload specifications
-
-Payload tables with a "repeat" column will have a count field prior to repeated
-fields.  So any fields with a ✅ after a count field will be repeated that many
-times.  If necessary, for nested repeat fields, there will be one ✅ for the
-first level, two for the next, etc.
-
-##### 1. StringBlock Payload
-
-Contains 1 or more strings, with IDs and CRC16 for each.
-
-| repeats | field | bytes    | description                                 |
-|:-------:|------:|---------:|---------------------------------------------|
-|         | 1     | 1        | Count of strings in block.                  |
-|   ✅    | 2     | variable | String ID (dint).                           |
-|   ✅    | 3     | 1        | Severity (Info, Warn, Error, Debug)         |
-|   ✅    | 4     | variable | NUL terminated format string (c-string)     |
-|   ✅    | 5     | 2        | The CRC for the severity and string (CRC16) |
-
-Format string contains embedded info that represents the type and how it's to be
-displayed.  Any character with a value less than 32 indicates the start of a
-field.
-
-See eType for more information.
-
-##### 2. EnumBlock Payload
+#### Enum Definition Stream
 
 ```c++
 enum eEnumStorageType : std::uint8_t {
@@ -407,38 +342,8 @@ enum eEnumStorageType : std::uint8_t {
 };
 ```
 
-| field | bytes     | description                                        |
-|------:|----------:|----------------------------------------------------|
-|  1    | variable  | Enum ID (dint)                                     |
-|  2    | 1         | Underlying enum storage type (eEnumStorageType)    |
-|  3    | variable  | Enum definition bytecode stream                    |
-
-The enum definition stream consists of a sequence of commands:
-
-```c++
-[ cmd_byte, command_payload... ]
-```
-
-Where:
-
-```c++
-opcode  = cmd_byte & OpcodeMask;
-payload = cmd_byte & PayloadMask;
-```
-
-Depending on the opcode and `active_bit_mask` state, the command payload may
-contain:
-
-- inline bit masks
-- name
-- formatting flags
-- `(enum_value, name)` pairs
-- nested child commands
-
-Commands that specify a count contain that many subcommands or pairs that relate
-to that command after it.
-
-Names are just c-strings (character bytes sequences ending in a NUL).
+An enum definition stream uses this storage type and bytecode command set to
+describe how enum values are named, grouped, and formatted.
 
 The enum definition stream is interpreted using the following command set:
 
@@ -554,20 +459,118 @@ enum eDefineEnum : std::uint8_t {
                                  //
                                  // Numeric, GroupIf and GroupIfNot always have an independent parameter.
                                  //
-                                 // abm = active_bit_mask
+                                 // SetMask only takes parameters if PayloadMask is not 0.  This
+                                 // means 31 very common bit masks can be specified inline in the
+                                 // command byte directly.
 };
 ```
 
-`Invalid` is opcode 0.  It is never a valid command.  In length specified
-streams, `Invalid` is an error. In non-length specified streams, `Invalid`
-terminates the command stream. In the case of the **EnumBlock**, we're using the
-length specified stream.
+In length specified streams, `Invalid` is an error. In non-length specified
+streams, `Invalid` terminates the command stream. In the case of the
+**EnumBlock**, the stream is length specified.
 
 To compress further, `inline_bit_mask`, `active_bit_mask` and `enum_value`
 values can be represented as dint types.  To get the best compression, place
 larger groups of bit patterns in the most significant area of the enum value.
 
-##### 3. DataBlock Payload
+Also, Named specifiers should come *before* Numeric, as once a Numeric is found
+for a bit set, Named would be ignored.
+
+### Packet Design
+
+The data is stored in packets with a maximum payload of 256 (I don't see any use
+for an empty packet).  I may make this configurable, but will start with 256
+byte payload.
+
+> **UPDATE:**
+>
+> Given my current packet definitions, the minimum payload is 5.  That makes for
+> 5-260 bytes per packet.  4 extra bytes doesn't sound like a lot, but it might
+> be useful.
+
+#### General Block Format
+
+| field | bytes | description                                                                    |
+|------:|------:|--------------------------------------------------------------------------------|
+| 1     | 1     | Block type: StringBlock, EnumBlock, DataBlock, TimeAnchorBlock, DropCountBlock |
+| 2     | 1     | Sequence number and continuation flags                                         |
+| 3     | 1     | Payload length minus 5                                                         |
+| 4     | 5-260 | Payload                                                                        |
+| 5     | 2     | CRC16                                                                          |
+| 6     | 4     | Fence                                                                          |
+
+Fields 1-3 are the header, 4 is the payload, 5 is the CRC and 6 ends the block.
+
+##### Field 2: Sequence And Continuation Flags
+
+The 6-bit sequence number detects short discontinuities. It is not intended to
+count long loss intervals.
+
+| field | bit   | description                   |
+|------:|------:|-------------------------------|
+| 1     | 0-5   | Sequence number (64 values).  |
+| 2     | 6     | Block continues.              |
+| 3     | 7     | Block is continuing.          |
+
+##### Field 3: Payload Length
+
+Field 3 stores the payload length minus 5.  Since the minimum payload is 5
+bytes, valid payload sizes are 5-260 bytes.
+
+##### Field 5: CRC16
+
+The CRC is based on [General Block](#general-block-format)'s fields 1-4.
+
+A continued block's CRC is seeded by the previous block's CRC.  A
+[Data Block](#3-data-block-payload) uses the string's CRC from the
+[String Block](#1-string-block-payload) as the seed.  Otherwise it's seeded with
+0.
+
+##### Field 6: Fence
+
+The fence is at the end because a block isn't finished unless a fence is found.
+Before the first block is emitted, there will have an explicit fence to start
+the blocks off.  Might be a different sequence like "!!!!" to show that this is
+the very first of a logging run.
+
+#### Payload specifications
+
+Payload tables with a "repeat" column will have a count field prior to repeated
+fields.  So any fields with a ✅ after a count field will be repeated that many
+times.  If necessary, for nested repeat fields, there will be one ✅ for the
+first level, two for the next, etc.
+
+##### 1. String Block Payload
+
+Contains 1 or more strings, with IDs and CRC16 for each.
+
+| repeats | field | bytes    | description                                 |
+|:-------:|------:|---------:|---------------------------------------------|
+|         | 1     | 1        | Count of strings in block.                  |
+|   ✅    | 2     | variable | String ID (dint).                           |
+|   ✅    | 3     | 1        | Severity (Info, Warn, Error, Debug)         |
+|   ✅    | 4     | variable | NUL terminated format string (c-string)     |
+|   ✅    | 5     | 2        | The CRC for the severity and string (CRC16) |
+
+Format string contains embedded info that represents the type and how it's to be
+displayed.  Any character with a value less than 32 indicates the start of a
+field.
+
+See eType for more information.
+
+##### 2. Enum Block Payload
+
+| field | bytes     | description                                        |
+|------:|----------:|----------------------------------------------------|
+|  1    | variable  | Enum ID (dint)                                     |
+|  2    | 1         | Underlying enum storage type (eEnumStorageType)    |
+|  3    | variable  | Enum definition bytecode stream                    |
+
+Field 3 is an enum definition bytecode stream. Its storage type, command set,
+and interpretation rules are specified in [Enum Definition
+Stream](#enum-definition-stream).
+
+##### 3. Data Block Payload
 
 This is the actual logged data.
 
@@ -585,7 +588,7 @@ for every event sent out.  The CRC for this block is seeded from the CRC of the
 string pointed at by the string ID. This helps verify that the correct string is
 used with the payload.
 
-##### 4. TimeAnchorBlock Payload
+##### 4. Time Anchor Block Payload
 
 | field | bytes    | description                                |
 |------:|---------:|--------------------------------------------|
@@ -594,7 +597,7 @@ used with the payload.
 This is outputted periodically to keep the DataBlock's timestamp relevant.
 Maybe every 10 minutes?
 
-##### 5. DropCountBlock Payload
+##### 5. Drop Count Block Payload
 
 If the log buffers can't be emptied fast enough, some events will have to be
 dropped.  First, repeated StringBlock and EnumBlock packets will be postponed.
