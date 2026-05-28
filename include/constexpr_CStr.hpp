@@ -16,6 +16,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string_view>
+#include <limits>
 
 namespace Constexpr
 {
@@ -40,7 +41,7 @@ namespace Constexpr
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    static constexpr size_type npos = static_cast<size_type>(-1);
+    static constexpr size_type npos{ std::numeric_limits<size_type>::max() };
 
     /**
      * @brief Constructs an empty string container.
@@ -274,8 +275,8 @@ namespace Constexpr
      *   zero if equal.
      */
     constexpr int compare(CStr rhs) const noexcept {
-      size_type i = 0;
-      const size_type common = m_size < rhs.m_size ? m_size : rhs.m_size;
+      size_type i{ 0 };
+      size_type const common{ m_size < rhs.m_size ? m_size : rhs.m_size };
 
       for (; i < common; ++i) {
         if (m_data[i] < rhs.m_data[i]) {
@@ -301,8 +302,8 @@ namespace Constexpr
      * @param rhs - The container to swap with.
      */
     constexpr void swap(CStr& rhs) noexcept {
-      const auto old_data = m_data;
-      const auto old_size = m_size;
+      auto const old_data{ m_data };
+      auto const old_size{ m_size };
       m_data = rhs.m_data;
       m_size = rhs.m_size;
       rhs.m_data = old_data;
@@ -394,4 +395,5 @@ namespace Constexpr
     lhs.swap(rhs);
   }
 } // namespace Constexpr
+
 #endif // CONSTEXPR_CSTR_HPP
