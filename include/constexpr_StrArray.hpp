@@ -47,7 +47,7 @@ namespace Constexpr
     using reverse_iterator = std::reverse_iterator<iterator>;
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
-    static constexpr size_type npos = static_cast<size_type>(-1);
+    static constexpr size_type npos{ std::numeric_limits<size_type>::max() };
 
     /**
      * @brief Constructs an empty string container.
@@ -85,7 +85,7 @@ namespace Constexpr
       static_assert(M <= N,
         "StrArray source string must fully fit in destination storage.");
 
-      for (size_type i = 0; i < M; ++i) {
+      for (size_type i{ 0 }; i < M; ++i) {
         m_data[i] = s[i];
       }
     }
@@ -207,7 +207,7 @@ namespace Constexpr
      * @return size_type - Number of characters in the logical string.
      */
     constexpr size_type size() const noexcept {
-      size_type const terminator = find_terminator();
+      size_type const terminator{ find_terminator() };
       return terminator == npos ? N : terminator;
     }
 
@@ -227,7 +227,7 @@ namespace Constexpr
      * @return size_type - Number of used bytes including the terminator.
      */
     constexpr size_type storage_size() const noexcept {
-      size_type const terminator = find_terminator();
+      size_type const terminator{ find_terminator() };
       assert(terminator != npos);
       return terminator == npos ? N : terminator + 1;
     }
@@ -428,10 +428,10 @@ namespace Constexpr
      */
     template <size_type M>
     constexpr int compare(StrArray<M> const& rhs) const noexcept {
-      size_type i = 0;
-      size_type const lhs_size = size();
-      size_type const rhs_size = rhs.size();
-      size_type const common = lhs_size < rhs_size ? lhs_size : rhs_size;
+      size_type i{ 0 };
+      size_type const lhs_size{ size() };
+      size_type const rhs_size{ rhs.size() };
+      size_type const common{ lhs_size < rhs_size ? lhs_size : rhs_size };
 
       while (i < common) {
         if (m_data[i] < rhs.data()[i]) {
@@ -459,8 +459,8 @@ namespace Constexpr
      * @param rhs - The container to swap with.
      */
     constexpr void swap(StrArray& rhs) noexcept {
-      for (size_type i = 0; i < N; ++i) {
-        value_type const old_value = m_data[i];
+      for (size_type i{ 0 }; i < N; ++i) {
+        value_type const old_value{ m_data[i] };
         m_data[i] = rhs.m_data[i];
         rhs.m_data[i] = old_value;
       }
@@ -474,7 +474,7 @@ namespace Constexpr
      *   terminator exists.
      */
     constexpr size_type find_terminator() const noexcept {
-      for (size_type i = 0; i < N; ++i) {
+      for (size_type i{ 0 }; i < N; ++i) {
         if (m_data[i] == '\0') {
           return i;
         }
