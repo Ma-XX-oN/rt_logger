@@ -1,5 +1,16 @@
 #ifndef ENUM_REGISTRY_HPP
 #define ENUM_REGISTRY_HPP
+/**
+ * @file enum_registry.hpp
+ * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
+ * @brief Code to register enums for streaming.
+ * @version 0.1
+ * @date 2026-05-28
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ * TODO: Need to flesh this out more.
+ */
 
 #include <iterator>
 #include <utility>
@@ -10,7 +21,7 @@
 #include <limits>
 #include <cassert>
 #include "bitwise_enum.hpp"
-#include "constexpr_cstr.hpp"
+#include "constexpr_CStr.hpp"
 #include "constexpr_num_to_StrArray.hpp"
 
 // All logged enums need to be registered
@@ -37,7 +48,7 @@ namespace impl {
    * @return std::size_t - The length of the string.
    */
   constexpr std::size_t strlen(char const* str) {
-    std::size_t i = 0;
+    std::size_t i{ 0 };
     for (; str[i]; ++i) {}
     return i;
   }
@@ -51,7 +62,7 @@ namespace impl {
    */
   template<std::size_t N, typename E>
   constexpr std::size_t max_len(std::tuple<E, Constexpr::CStr> const (&list)[N]) {
-    constexpr std::size_t N = std::size(list);
+    constexpr std::size_t list_size{ std::size(list) };
     std::size_t max_value{0};
     for (auto const& v : list) {
       max_value = std::max(max_value, strlen(std::get<1>(v)));
@@ -69,7 +80,7 @@ namespace impl {
   template<std::size_t N>
   constexpr auto str_to_array(Constexpr::CStr const& Str) {
     std::array<char, N> arr{};
-    for (std::size_t i = 0; i < N; ++i) {
+    for (std::size_t i{ 0 }; i < N; ++i) {
       arr[i] = Str[i];
     }
     return arr;
@@ -100,10 +111,10 @@ namespace impl {
 
 } // namespace impl
 
-constexpr char const enum_test_name[] = "enum_test";
+constexpr char const enum_test_name[]{"enum_test"};
 
-constexpr auto EnumName = enum_test_name;
-constexpr auto NumFmt = eNumFmt::Dec;
+constexpr auto EnumName{ enum_test_name };
+constexpr auto NumFmt{ eNumFmt::Dec };
 using Enum = enum_test;
 
 template<>
@@ -112,7 +123,7 @@ struct enum_info<Enum> : enum_base<1, EnumName>
   using MapType = std::tuple<Enum, Constexpr::CStr>;
 
   static constexpr int find(Enum e) {
-    for (int i = 0; i < std::size(values); ++i) {
+    for (int i{ 0 }; i < std::size(values); ++i) {
       if (std::get<0>(values[i]) == e) {
         return i;
       }
