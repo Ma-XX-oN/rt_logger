@@ -3,7 +3,7 @@
 
 /**
  * @file constexpr_num_to_StrArray.hpp
- * @author your name (you@domain.com)
+ * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Formats a number into a constexpr StrArray object.
  * @version 0.1
  * @date 2026-05-24
@@ -343,7 +343,7 @@ constexpr std::array<char, N> to_str_as_arr(T value)
   std::array<char, N> str{ };
   auto it { str.begin() };
   auto end { str.end() - 1 };
-  const bool is_negative = std::is_signed_v<T> && value < 0;
+  bool const is_negative{ std::is_signed_v<T> && value < 0 };
 
   if (value) {
     append_reversed_digits<NumFmt>(it, end, value);
