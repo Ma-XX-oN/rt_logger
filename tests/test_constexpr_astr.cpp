@@ -1,14 +1,14 @@
-#include "constexpr_StrArray.hpp"
+#include "constexpr_AStr.hpp"
 
 #include <gtest/gtest.h>
 
 #include <stdexcept>
 #include <string_view>
 
-using Constexpr::StrArray;
+using Constexpr::AStr;
 
 constexpr bool kConstexprDefaultConstructionWorks{ []() constexpr {
-  StrArray<8> str{};
+  AStr<8> str{};
   return str.empty()
     && str.size() == 0u
     && str.length() == 0u
@@ -25,7 +25,7 @@ constexpr bool kConstexprDefaultConstructionWorks{ []() constexpr {
 static_assert(kConstexprDefaultConstructionWorks);
 
 constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
-  StrArray<8> str{"alpha"};
+  AStr<8> str{"alpha"};
   return !str.empty()
     && str.size() == 5u
     && str.length() == 5u
@@ -47,7 +47,7 @@ constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
 static_assert(kConstexprLiteralConstructionWorks);
 
 constexpr bool kConstexprCtadWorks{ []() constexpr {
-  StrArray str{"hi"};
+  AStr str{"hi"};
   return str.size() == 2u
     && str.length() == 2u
     && str.storage_size() == 3u
@@ -57,9 +57,9 @@ constexpr bool kConstexprCtadWorks{ []() constexpr {
 static_assert(kConstexprCtadWorks);
 
 constexpr bool kConstexprCompareWorks{ []() constexpr {
-  StrArray<8> alpha{"alpha"};
-  StrArray<4> bet{"bet"};
-  StrArray<6> also_alpha{"alpha"};
+  AStr<8> alpha{"alpha"};
+  AStr<4> bet{"bet"};
+  AStr<6> also_alpha{"alpha"};
   return alpha.compare(bet) < 0
     && bet.compare(alpha) > 0
     && alpha.compare(also_alpha) == 0
@@ -73,9 +73,9 @@ constexpr bool kConstexprCompareWorks{ []() constexpr {
 static_assert(kConstexprCompareWorks);
 
 constexpr bool kConstexprAtWorks{ []() constexpr {
-  StrArray<8> str{"alpha"};
+  AStr<8> str{"alpha"};
   str.at(1) = 'o';
-  StrArray<8> const& const_str{ str };
+  AStr<8> const& const_str{ str };
   return str.view() == std::string_view("aopha")
     && const_str.at(0) == 'a'
     && const_str.at(5) == '\0';
@@ -83,7 +83,7 @@ constexpr bool kConstexprAtWorks{ []() constexpr {
 static_assert(kConstexprAtWorks);
 
 constexpr bool kConstexprMutationWorks{ []() constexpr {
-  StrArray<8> str{"abc"};
+  AStr<8> str{"abc"};
   str[1] = 'x';
   str[2] = '\0';
   return str.view() == std::string_view("ax")
@@ -94,7 +94,7 @@ constexpr bool kConstexprMutationWorks{ []() constexpr {
 static_assert(kConstexprMutationWorks);
 
 constexpr bool kConstexprClearWorks{ []() constexpr {
-  StrArray<8> str{"clear"};
+  AStr<8> str{"clear"};
   str.clear();
   return str.empty()
     && str.size() == 0u
@@ -104,8 +104,8 @@ constexpr bool kConstexprClearWorks{ []() constexpr {
 static_assert(kConstexprClearWorks);
 
 constexpr bool kConstexprMemberSwapWorks{ []() constexpr {
-  StrArray<8> lhs{"left"};
-  StrArray<8> rhs{"right"};
+  AStr<8> lhs{"left"};
+  AStr<8> rhs{"right"};
   lhs.swap(rhs);
   return lhs.view() == std::string_view("right")
     && rhs.view() == std::string_view("left");
@@ -113,15 +113,15 @@ constexpr bool kConstexprMemberSwapWorks{ []() constexpr {
 static_assert(kConstexprMemberSwapWorks);
 
 constexpr bool kConstexprFreeSwapWorks{ []() constexpr {
-  StrArray<8> lhs{"one"};
-  StrArray<8> rhs{"two"};
+  AStr<8> lhs{"one"};
+  AStr<8> rhs{"two"};
   swap(lhs, rhs);
   return lhs.view() == std::string_view("two")
     && rhs.view() == std::string_view("one");
 }() };
 static_assert(kConstexprFreeSwapWorks);
 
-TEST(StrArrayConstexpr, SupportsCompileTimeEvaluation)
+TEST(AStrConstexpr, SupportsCompileTimeEvaluation)
 {
   EXPECT_TRUE(kConstexprDefaultConstructionWorks);
   EXPECT_TRUE(kConstexprLiteralConstructionWorks);
@@ -134,9 +134,9 @@ TEST(StrArrayConstexpr, SupportsCompileTimeEvaluation)
   EXPECT_TRUE(kConstexprFreeSwapWorks);
 }
 
-TEST(StrArrayRuntime, PreservesStringAndStorageSemantics)
+TEST(AStrRuntime, PreservesStringAndStorageSemantics)
 {
-  StrArray<8> str{"hello"};
+  AStr<8> str{"hello"};
 
   EXPECT_EQ(5u, str.size());
   EXPECT_EQ(5u, str.length());
@@ -147,9 +147,9 @@ TEST(StrArrayRuntime, PreservesStringAndStorageSemantics)
   EXPECT_STREQ("hello", str.c_str());
 }
 
-TEST(StrArrayRuntime, AtAllowsTerminatorAndThrowsPastIt)
+TEST(AStrRuntime, AtAllowsTerminatorAndThrowsPastIt)
 {
-  StrArray<8> str{"hello"};
+  AStr<8> str{"hello"};
 
   EXPECT_EQ('\0', str.at(5));
   EXPECT_THROW(

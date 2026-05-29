@@ -1,15 +1,16 @@
-#ifndef CONSTEXPR_NUM_TO_STR_ARRAY_HPP
-#define CONSTEXPR_NUM_TO_STR_ARRAY_HPP
+#ifndef CONSTEXPR_NUM_TO_ASTR_HPP
+#define CONSTEXPR_NUM_TO_ASTR_HPP
 
 /**
- * @file constexpr_num_to_StrArray.hpp
+ * @file constexpr_num_to_AStr.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
- * @brief Formats a number into a constexpr StrArray object.
+ * @brief Formats a number into a constexpr AStr object.
  * @version 0.1
  * @date 2026-05-24
  * 
  * @copyright Copyright (c) 2026
  * 
+ * NODE: Incomplete
  */
 #include <cstdint>
 #include <array>
@@ -359,4 +360,4 @@ constexpr std::array<char, N> to_str_as_arr(T value)
   return str;
 }
 
-#endif // CONSTEXPR_NUM_TO_STR_ARRAY_HPP
+#endif // CONSTEXPR_NUM_TO_ASTR_HPP

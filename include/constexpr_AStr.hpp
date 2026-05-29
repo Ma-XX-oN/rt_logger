@@ -1,7 +1,7 @@
-#ifndef CONSTEXPR_STRARRAY_HPP
-#define CONSTEXPR_STRARRAY_HPP
+#ifndef CONSTEXPR_ASTR_HPP
+#define CONSTEXPR_ASTR_HPP
 /**
- * @file constexpr_StrArray.hpp
+ * @file constexpr_AStr.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Owns a fixed-capacity null-terminated string in constexpr-friendly
  *   storage.
@@ -23,16 +23,16 @@ namespace Constexpr
    * @brief An owning fixed-capacity contiguous container for null-terminated
    *   strings.
    *
-   * `StrArray<N>` stores up to `N - 1` characters plus a trailing null
+   * `AStr<N>` stores up to `N - 1` characters plus a trailing null
    * terminator. The logical character sequence ends at the first `'\0'`, while
    * the underlying storage always remains `N` bytes wide.
    *
    * @tparam N - Storage capacity including the trailing null terminator.
    */
   template <std::size_t N>
-  class StrArray {
+  class AStr {
   public:
-    static_assert(N > 0, "StrArray requires storage for at least a null terminator.");
+    static_assert(N > 0, "AStr requires storage for at least a null terminator.");
 
     using Base = std::array<char, N>;
     using value_type = char;
@@ -52,7 +52,7 @@ namespace Constexpr
     /**
      * @brief Constructs an empty string container.
      */
-    constexpr StrArray() noexcept
+    constexpr AStr() noexcept
     : m_data{}
     {
     }
@@ -63,7 +63,7 @@ namespace Constexpr
      *
      * @param storage - Full storage buffer including the terminating null.
      */
-    constexpr StrArray(Base const& storage) noexcept
+    constexpr AStr(Base const& storage) noexcept
     : m_data(storage)
     {
       assert(find_terminator() != npos);
@@ -79,11 +79,11 @@ namespace Constexpr
      * @param s - Source string storage.
      */
     template <std::size_t M>
-    constexpr StrArray(char const (&s)[M]) noexcept
+    constexpr AStr(char const (&s)[M]) noexcept
     : m_data{}
     {
       static_assert(M <= N,
-        "StrArray source string must fully fit in destination storage.");
+        "AStr source string must fully fit in destination storage.");
 
       for (size_type i{ 0 }; i < M; ++i) {
         m_data[i] = s[i];
@@ -349,7 +349,7 @@ namespace Constexpr
      */
     constexpr reference at(size_type i) {
       if (i >= storage_size()) {
-        throw std::out_of_range("StrArray::at");
+        throw std::out_of_range("AStr::at");
       }
       return m_data[i];
     }
@@ -364,7 +364,7 @@ namespace Constexpr
      */
     constexpr const_reference at(size_type i) const {
       if (i >= storage_size()) {
-        throw std::out_of_range("StrArray::at");
+        throw std::out_of_range("AStr::at");
       }
       return m_data[i];
     }
@@ -427,7 +427,7 @@ namespace Constexpr
      *   `0` if both strings are equal.
      */
     template <size_type M>
-    constexpr int compare(StrArray<M> const& rhs) const noexcept {
+    constexpr int compare(AStr<M> const& rhs) const noexcept {
       size_type i{ 0 };
       size_type const lhs_size{ size() };
       size_type const rhs_size{ rhs.size() };
@@ -458,7 +458,7 @@ namespace Constexpr
      *
      * @param rhs - The container to swap with.
      */
-    constexpr void swap(StrArray& rhs) noexcept {
+    constexpr void swap(AStr& rhs) noexcept {
       for (size_type i{ 0 }; i < N; ++i) {
         value_type const old_value{ m_data[i] };
         m_data[i] = rhs.m_data[i];
@@ -486,10 +486,10 @@ namespace Constexpr
   };
 
   template <std::size_t N>
-  StrArray(std::array<char, N>) -> StrArray<N>;
+  AStr(std::array<char, N>) -> AStr<N>;
 
   template <std::size_t N>
-  StrArray(char const (&)[N]) -> StrArray<N>;
+  AStr(char const (&)[N]) -> AStr<N>;
 
   /**
    * @brief Checks whether two string containers are equal.
@@ -501,8 +501,8 @@ namespace Constexpr
    * @return bool - `true` if both strings are equal.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator==(StrArray<LhsN> const& lhs,
-    StrArray<RhsN> const& rhs) noexcept
+  inline constexpr bool operator==(AStr<LhsN> const& lhs,
+    AStr<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) == 0;
   }
@@ -517,8 +517,8 @@ namespace Constexpr
    * @return bool - `true` if the strings differ.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator!=(StrArray<LhsN> const& lhs,
-    StrArray<RhsN> const& rhs) noexcept
+  inline constexpr bool operator!=(AStr<LhsN> const& lhs,
+    AStr<RhsN> const& rhs) noexcept
   {
     return !(lhs == rhs);
   }
@@ -534,8 +534,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs < rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator<(StrArray<LhsN> const& lhs,
-    StrArray<RhsN> const& rhs) noexcept
+  inline constexpr bool operator<(AStr<LhsN> const& lhs,
+    AStr<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) < 0;
   }
@@ -551,8 +551,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs <= rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator<=(StrArray<LhsN> const& lhs,
-    StrArray<RhsN> const& rhs) noexcept
+  inline constexpr bool operator<=(AStr<LhsN> const& lhs,
+    AStr<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) <= 0;
   }
@@ -568,8 +568,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs > rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator>(StrArray<LhsN> const& lhs,
-    StrArray<RhsN> const& rhs) noexcept
+  inline constexpr bool operator>(AStr<LhsN> const& lhs,
+    AStr<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) > 0;
   }
@@ -585,8 +585,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs >= rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator>=(StrArray<LhsN> const& lhs,
-    StrArray<RhsN> const& rhs) noexcept
+  inline constexpr bool operator>=(AStr<LhsN> const& lhs,
+    AStr<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) >= 0;
   }
@@ -599,9 +599,9 @@ namespace Constexpr
    * @param rhs - Right-hand string container.
    */
   template <std::size_t N>
-  inline constexpr void swap(StrArray<N>& lhs, StrArray<N>& rhs) noexcept {
+  inline constexpr void swap(AStr<N>& lhs, AStr<N>& rhs) noexcept {
     lhs.swap(rhs);
   }
 } // namespace Constexpr
 
-#endif // CONSTEXPR_STRARRAY_HPP
+#endif // CONSTEXPR_ASTR_HPP

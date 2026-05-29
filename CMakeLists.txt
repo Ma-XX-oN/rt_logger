@@ -96,7 +96,7 @@ if(DINT_BUILD_TESTS)
     tests/test_dynamic_int.cpp
     tests/test_machine_num.cpp
     tests/test_constexpr_cstr.cpp
-    tests/test_strarray.cpp
+    tests/test_constexpr_astr.cpp
   )
 
   add_executable(logger_tests
