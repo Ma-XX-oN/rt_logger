@@ -1,7 +1,7 @@
 #ifndef CONSTEXPR_CSTR_HPP
 #define CONSTEXPR_CSTR_HPP
 /**
- * @file constexpr_CStr.hpp
+ * @file CStr.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Allows a c-string to be passed around more easily as a constexpr
  *   object.

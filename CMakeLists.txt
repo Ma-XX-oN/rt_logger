@@ -11,7 +11,7 @@ add_library(dynamic_int INTERFACE)
 
 target_include_directories(dynamic_int
   INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_compile_features(dynamic_int
@@ -75,7 +75,7 @@ endfunction()
 
 # Small scratch executable for manual experiments while developing the library.
 add_executable(playground
-  include/playground.cpp
+  playground.cpp
 )
 
 target_link_libraries(playground

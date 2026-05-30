@@ -2,7 +2,7 @@
 #define CONSTEXPR_NUM_TO_ASTR_HPP
 
 /**
- * @file constexpr_num_to_AStr.hpp
+ * @file num_to_AStr.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Formats a number into a constexpr AStr object.
  * @version 0.1

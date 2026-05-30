@@ -1,7 +1,7 @@
 #ifndef CONSTEXPR_ASTR_HPP
 #define CONSTEXPR_ASTR_HPP
 /**
- * @file constexpr_AStr.hpp
+ * @file AStr.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Owns a fixed-capacity null-terminated string in constexpr-friendly
  *   storage.
@@ -34,7 +34,6 @@ namespace Constexpr
   public:
     static_assert(N > 0, "AStr requires storage for at least a null terminator.");
 
-    using Base = std::array<char, N>;
     using value_type = char;
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
@@ -58,18 +57,6 @@ namespace Constexpr
     }
 
     /**
-     * @brief Constructs a string container from an existing null-terminated
-     *   storage buffer.
-     *
-     * @param storage - Full storage buffer including the terminating null.
-     */
-    constexpr AStr(Base const& storage) noexcept
-    : m_data(storage)
-    {
-      assert(find_terminator() != npos);
-    }
-
-    /**
      * @brief Constructs a string container from a string literal or char array.
      *
      * The entire source array, including its trailing null terminator, must
@@ -79,7 +66,7 @@ namespace Constexpr
      * @param s - Source string storage.
      */
     template <std::size_t M>
-    constexpr AStr(char const (&s)[M]) noexcept
+    constexpr explicit AStr(char const (&s)[M]) noexcept
     : m_data{}
     {
       static_assert(M <= N,
@@ -482,7 +469,7 @@ namespace Constexpr
       return npos;
     }
 
-    Base m_data;
+    std::array<char, N> m_data;
   };
 
   template <std::size_t N>

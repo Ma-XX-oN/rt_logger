@@ -22,9 +22,9 @@
 #include <limits>
 #include <stdexcept>
 #include <tuple>
-#include "include/machine_num.hpp"
-#include "include/dynamic_int.hpp"
-#include "include/bitwise_enum.hpp"
+#include "machine_num.hpp"
+#include "dynamic_int.hpp"
+#include "bitwise_enum.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
 
