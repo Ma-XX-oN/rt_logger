@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.23)
 
 project(logger LANGUAGES CXX)
 
+# Make the requested language mode explicit so both the real build and editor
+# tooling see the same standard level.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Toggle optional test-related build behavior from the configure step.
 option(DINT_BUILD_TESTS "Build unit tests" ON)
 option(DINT_ENABLE_UBSAN "Build tests with UBSan" ON)
