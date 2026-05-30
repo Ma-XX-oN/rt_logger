@@ -1,10 +1,10 @@
-#ifndef CONSTEXPR_NUM_TO_STRING_HPP
-#define CONSTEXPR_NUM_TO_STRING_HPP
+#ifndef CONSTEXPR_INT_TO_STRING_HPP
+#define CONSTEXPR_INT_TO_STRING_HPP
 
 /**
- * @file num_to_string.hpp
+ * @file int_to_string.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
- * @brief Formats a number into a constexpr string object.
+ * @brief Formats an integer into a constexpr string object.
  * @version 0.1
  * @date 2026-05-24
  *
@@ -13,38 +13,42 @@
  * NODE: Incomplete
  */
 #include <cstdint>
-#include <array>
+#include "algorithm.hpp"
 #include "bitwise_enum.hpp"
+#include "string.hpp"
 
-/**
- * @brief Shows how an enum is to be viewed when viewed as a number.
- */
-enum eNumFmt : std::uint8_t {
-  BaseMask                  = 0b00000011, // If any bits in BaseMask set, then not decimal
-  Dec                       = 0b00000000, // Make decimal value string
-  Bin                       = 0b00000001, // Make binary value string
-  Oct                       = 0b00000010, // Make octal value string
-  Hex                       = 0b00000011, // Make hexadecimal value string
-  ShowLeadingBase           = 0b00000100, // 0x - hex, 0o - octal, 0b - binary. Only when BaseMask not 0.
-  ShowPlusSign              = 0b00000100, // Use '+' for non negative values when signed number and BaseMask is 0.
-  ShowUppercase             = 0b00001000, // Only meaningful for hex
+namespace Constexpr {
+  /**
+  * @brief Shows how an enum is to be viewed when viewed as a number.
+  */
+  enum eIntFmt : std::uint8_t {
+    BaseMask                  = 0b00000011, // If any bits in BaseMask set, then not decimal
+    Dec                       = 0b00000000, // Make decimal value string
+    Bin                       = 0b00000001, // Make binary value string
+    Oct                       = 0b00000010, // Make octal value string
+    Hex                       = 0b00000011, // Make hexadecimal value string
+    ShowLeadingBase           = 0b00000100, // 0x - hex, 0o - octal, 0b - binary. Only when BaseMask not 0.
+    ShowPlusSign              = 0b00000100, // Use '+' for non negative values when signed number and BaseMask is 0.
+    ShowUppercase             = 0b00001000, // Only meaningful for hex
 
-  AlignRight                = 0b00010000, // 0 = left, 1 = right
+    AlignRight                = 0b00010000, // 0 = left, 1 = right
 
-  // Base 10 - ShowLeadingBase has no effect
-  PadWithSpace              = 0b00100000, // 0 = '0', 1 = ' '. Only when AlignRight is set.
-  SignNextToNumber          = 0b01000000, // 0 = Aligned left, 1 = next to number.  Only when AlignRight is set.
-  Unused                    = 0b10000000,
+    // Base 10 - ShowLeadingBase has no effect
+    PadWithSpace              = 0b00100000, // 0 = '0', 1 = ' '. Only when AlignRight is set.
+    SignNextToNumber          = 0b01000000, // 0 = Aligned left, 1 = next to number.  Only when AlignRight is set.
+    Unused                    = 0b10000000,
 
-  // Not base 10
-  //  AlignRight && ShowLeadingBase &&  PadWithSpace => 0x next to min width number
-  //  AlignRight && ShowLeadingBase && !PadWithSpace => 0x left most of field
-  // !AlignRight && ShowLeadingBase                  => 0x next to min width number
-};
+    // Not base 10
+    //  AlignRight && ShowLeadingBase &&  PadWithSpace => 0x next to min width number
+    //  AlignRight && ShowLeadingBase && !PadWithSpace => 0x left most of field
+    // !AlignRight && ShowLeadingBase                  => 0x next to min width number
+  };
+} // namespace Constexpr
 
 template<>
-struct BitwiseOps<eNumFmt> : std::true_type {};
+struct BitwiseOps<Constexpr::eIntFmt> : std::true_type {};
 
+namespace Constexpr {
 namespace impl {
   /**
    * @brief Calculates the number of characters required to display value.
@@ -60,7 +64,7 @@ namespace impl {
   template <typename T
     , std::enable_if_t<std::is_integral_v<T>, bool> = true>
   constexpr std::size_t digits_required(T value, T base) {
-    std::size_t digits{ value == 0 || std::is_signed_v<T> && value < 0 && base == 10 };
+    std::size_t digits{ value == 0 || (std::is_signed_v<T> && value < 0 && base == 10) };
     if (base == 10) {
       while (value) {
         value /= base;
@@ -101,60 +105,28 @@ namespace impl {
   /**
    * @brief Gets the max number of characters to store string rep of enum value.
    *
-   * @tparam Num - Number to display as number.
-   * @tparam NumFmt - Info stating how to format \p Num.
+   * @tparam Int - Integer to display.
+   * @tparam IntFmt - Info stating how to format \p Int.
    * @return std::size_t - Size of stringized number, including NUL.
    */
-  template <typename Num, eNumFmt NumFmt>
+  template <typename Int, eIntFmt IntFmt>
   constexpr std::size_t max_digits_required() {
     constexpr int bases[] { 10, 2, 8, 16 };
-    using UT = std::underlying_type_t<Num>;
-    constexpr int base{ bases[NumFmt & BaseMask] };
+    using UT = std::underlying_type_t<Int>;
+    constexpr int base{ bases[IntFmt & BaseMask] };
     if (base == 10) {
       return max_digits_required<UT>(base) + 1;
     } else {
       return max_digits_required<UT>(base) + 1
         // add 2 chars for the leading base prefix
-        + (NumFmt & eNumFmt::ShowLeadingBase ? 2 : 0);
+        + (IntFmt & eIntFmt::ShowLeadingBase ? 2 : 0);
     }
   }
 
-  /**
-   * @brief Reverses elements in an array.
-   *
-   * Using this because it's constexpr and runs in C++17.
-   *
-   * Taken from https://en.cppreference.com/cpp/algorithm/reverse
-   *
-   * @tparam BidirIt - Bidirectional iterator type.
-   * @param first - First element in container to reverse.
-   * @param last - One past last element in container to reverse.
-   */
-  template<class BidirIt>
-  constexpr // since C++20
-  void reverse(BidirIt first, BidirIt last)
-  {
-    using iter_cat = typename std::iterator_traits<BidirIt>::iterator_category;
-
-    // Tag dispatch, e.g. calling reverse_impl(first, last, iter_cat()),
-    // can be used in C++14 and earlier modes.
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, iter_cat>)
-    {
-      if (first == last)
-        return;
-
-      for (--last; first < last; (void)++first, --last)
-        std::iter_swap(first, last);
-    }
-    else
-      while (first != last && first != --last)
-        std::iter_swap(first++, last);
-  }
-
-  template <eNumFmt NumFmt>
+  template <eIntFmt IntFmt>
   struct enum_fmt_traits {
     static constexpr int base_index{
-      static_cast<int>(NumFmt & eNumFmt::BaseMask)
+      static_cast<int>(IntFmt & eIntFmt::BaseMask)
     };
     static constexpr int base{ [] {
       constexpr int bases[] { 10, 2, 8, 16 };
@@ -162,20 +134,20 @@ namespace impl {
     }() };
     static constexpr char base_symbol{ " box"[base_index] };
     static constexpr char const* digits{
-      NumFmt & eNumFmt::ShowUppercase
+      IntFmt & eIntFmt::ShowUppercase
       ? "0123456789ABCDEF"
       : "0123456789abcdef"
     };
-    static constexpr bool align_right{ NumFmt & eNumFmt::AlignRight };
-    static constexpr bool pad_with_space{ NumFmt & eNumFmt::PadWithSpace };
+    static constexpr bool align_right{ IntFmt & eIntFmt::AlignRight };
+    static constexpr bool pad_with_space{ IntFmt & eIntFmt::PadWithSpace };
     static constexpr bool sign_next_to_number{
-      NumFmt & eNumFmt::SignNextToNumber
+      IntFmt & eIntFmt::SignNextToNumber
     };
     static constexpr bool show_leading_base{
-      NumFmt & eNumFmt::ShowLeadingBase
+      IntFmt & eIntFmt::ShowLeadingBase
     };
     static constexpr bool show_plus_sign{
-      NumFmt & eNumFmt::ShowPlusSign
+      IntFmt & eIntFmt::ShowPlusSign
     };
   };
 
@@ -214,17 +186,17 @@ namespace impl {
   /**
    * @brief Append the digits of an integer in reverse order.
    *
-   * @tparam NumFmt - How to format the number.
+   * @tparam IntFmt - How to format the integer.
    * @tparam T - Integer type of the value.
    * @tparam It - Iterator type for the output buffer.
    * @param it - Current insertion point. Advanced after writing.
    * @param end - Position reserved for the terminating NUL.
    * @param value - Value to format.
    */
-  template <eNumFmt NumFmt, typename T, typename It
+  template <eIntFmt IntFmt, typename T, typename It
     , std::enable_if_t<std::is_integral_v<T>, bool> = true>
   constexpr void append_reversed_digits(It& it, It end, T value) {
-    using fmt = enum_fmt_traits<NumFmt>;
+    using fmt = enum_fmt_traits<IntFmt>;
 
     if (fmt::base == 10) {
       for (; it != end && value; ++it) {
@@ -256,18 +228,17 @@ namespace impl {
   /**
    * @brief Append sign, base prefix, and padding in reverse order.
    *
-   * @tparam NumFmt - How to format the number.
+   * @tparam IntFmt - How to format the integer.
    * @tparam IsSigned - States if the type to stringize a signed type.
    * @tparam It - Iterator type for the output buffer.
    * @param it - Current insertion point. Advanced after writing.
-   * @param pad_end - Position reserved for the terminating NUL.
    * @param end - One past the end of the output buffer.
    * @param is_negative - Whether the original value is negative.
    */
-  template <eNumFmt NumFmt, bool IsSigned, typename It>
-  constexpr void append_reversed_affixes(It& it, It pad_end, It end,
-    bool is_negative) {
-    using fmt = enum_fmt_traits<NumFmt>;
+  template <eIntFmt IntFmt, bool IsSigned, typename It>
+  constexpr void append_reversed_affixes(It& it, It end, bool is_negative) {
+    using fmt = enum_fmt_traits<IntFmt>;
+    It pad_end { end };
 
     if (fmt::align_right) {
       if (fmt::base == 10) {
@@ -323,41 +294,47 @@ namespace impl {
   }
 } // namespace impl
 
-/**
- * @brief Create text representation of number and return in std::array.
- *
- * @tparam Fmt - How to format the number.
- * @tparam N - Number of elements to use for std::array.
- *
- *   NOTE: It is UB if too small for the number.  Use \c max_digits_required()
- *         with \c <NumType,eNumFmt> template parameters to help prevent this
- *         issue.
- *
- * @tparam T - Integer type of value to make into a string.
- * @param value - value to make into a string.
- * @return std::array<char, N> - Storage of string representation.
- */
-template <eNumFmt NumFmt, std::size_t N, typename T
-  , std::enable_if_t<std::is_integral_v<T>, bool> = true>
-constexpr std::array<char, N> to_str_as_arr(T value)
-{
-  std::array<char, N> str{ };
-  auto it { str.begin() };
-  auto end { str.end() - 1 };
-  bool const is_negative{ std::is_signed_v<T> && value < 0 };
+  /**
+  * @brief Create text representation of an integer and return as a string.
+  *
+  * @tparam IntFmt - How to format the integer.
+  * @tparam N - Storage capacity of the returned string, including the
+  *   trailing null terminator.
+  *
+  *   NOTE: It is UB if too small for the number.  Use \c max_digits_required()+1
+  *         with \c <IntType,eIntFmt> template parameters to help prevent this
+  *         issue.
+  *
+  * @tparam T - Integer type of value to make into a string.
+  * @param value - value to make into a string.
+  * @return Constexpr::string<N> - String representation of the integer.
+  */
+  template <eIntFmt IntFmt, std::size_t N, typename T
+    , std::enable_if_t<std::is_integral_v<T>, bool> = true>
+  constexpr Constexpr::string<N> int_to_string(T value)
+  {
+    Constexpr::string<N> buf{ };
+    buf.resize(buf.capacity());
 
-  if (value) {
-    append_reversed_digits<NumFmt>(it, end, value);
-  } else {
-    static_assert(N >= 2);
-    str[it++] = '0';
+    auto it { buf.begin() };
+    auto end { buf.end() };
+    bool const is_negative{ std::is_signed_v<T> && value < 0 };
+
+    if (value) {
+      impl::append_reversed_digits<IntFmt>(it, end, value);
+    } else {
+      static_assert(N >= 2);
+      *it++ = '0';
+    }
+
+    impl::append_reversed_affixes<IntFmt, std::is_signed_v<T>>(
+      it, end, is_negative);
+
+    auto const count{ static_cast<std::size_t>(it - buf.begin()) };
+    buf.resize(count);
+    Constexpr::reverse(buf.begin(), buf.end());
+    return buf;
   }
+} // namespace Constexpr
 
-  append_reversed_affixes<NumFmt, std::is_signed_v<T>>(
-    it, end, str.end(), is_negative);
-  reverse(str.begin(), it);
-  assert(it != str.end()); // make sure haven't overwritten the last char
-  return str;
-}
-
-#endif // CONSTEXPR_NUM_TO_STRING_HPP
+#endif // CONSTEXPR_INT_TO_STRING_HPP

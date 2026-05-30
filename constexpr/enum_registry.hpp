@@ -22,7 +22,7 @@
 #include <cassert>
 #include "bitwise_enum.hpp"
 #include "CStr.hpp"
-#include "num_to_string.hpp"
+#include "int_to_string.hpp"
 
 // All logged enums need to be registered
 template<typename E>
@@ -114,7 +114,7 @@ namespace impl {
 constexpr char const enum_test_name[]{"enum_test"};
 
 constexpr auto EnumName{ enum_test_name };
-constexpr auto NumFmt{ eNumFmt::Dec };
+constexpr auto IntFmt{ eIntFmt::Dec };
 using Enum = enum_test;
 
 template<>
@@ -139,13 +139,13 @@ struct enum_info<Enum> : enum_base<1, EnumName>
 
   using UT = std::underlying_type_t<Enum>;
   static constexpr auto MAX_POSSIBLE_DIGITS{
-    (NumFmt & eNumFmt::BaseMask) == eNumFmt::Dec ? 1 + impl::max_digits_required<UT>(10) :
-    (NumFmt & eNumFmt::BaseMask) == eNumFmt::Bin ? 1 + impl::max_digits_required<UT>(2)  :
-    (NumFmt & eNumFmt::BaseMask) == eNumFmt::Oct ? 1 + impl::max_digits_required<UT>(8)  :
-    (NumFmt & eNumFmt::BaseMask) == eNumFmt::Hex ? 1 + impl::max_digits_required<UT>(16) :
+    (IntFmt & eIntFmt::BaseMask) == eIntFmt::Dec ? 1 + impl::max_digits_required<UT>(10) :
+    (IntFmt & eIntFmt::BaseMask) == eIntFmt::Bin ? 1 + impl::max_digits_required<UT>(2)  :
+    (IntFmt & eIntFmt::BaseMask) == eIntFmt::Oct ? 1 + impl::max_digits_required<UT>(8)  :
+    (IntFmt & eIntFmt::BaseMask) == eIntFmt::Hex ? 1 + impl::max_digits_required<UT>(16) :
     throw "Impossible. There are only 4 options"
   };
-  static constexpr auto NUM_DECORATOR_SIZE{ sizeof(Enum) / 4 + 3 };
+  static constexpr auto INT_DECORATOR_SIZE{ sizeof(Enum) / 4 + 3 };
 
   template<Enum E>
   static constexpr auto to_string() {
@@ -154,7 +154,7 @@ struct enum_info<Enum> : enum_base<1, EnumName>
     constexpr std::size_t N {
       std::max({
         impl::max_len(values),
-        impl::strlen(UNKNOWN) + NUM_DECORATOR_SIZE,
+        impl::strlen(UNKNOWN) + INT_DECORATOR_SIZE,
         impl::strlen(enum_test_name)
       })
     };
