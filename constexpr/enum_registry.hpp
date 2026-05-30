@@ -22,7 +22,7 @@
 #include <cassert>
 #include "bitwise_enum.hpp"
 #include "CStr.hpp"
-#include "num_to_AStr.hpp"
+#include "num_to_string.hpp"
 
 // All logged enums need to be registered
 template<typename E>

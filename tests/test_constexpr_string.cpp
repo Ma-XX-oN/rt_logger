@@ -1,4 +1,4 @@
-#include "constexpr/AStr.hpp"
+#include "constexpr/string.hpp"
 
 #include <gtest/gtest.h>
 
@@ -6,11 +6,11 @@
 #include <string_view>
 #include <utility>
 
-using Constexpr::AStr;
+using Constexpr::string;
 
 constexpr bool kConstexprDefaultConstructionWorks{ []() constexpr {
   // Start from the empty-string state.
-  AStr<8> str{};
+  string<8> str{};
 
   return str.empty()
     && str.size() == 0u
@@ -25,7 +25,7 @@ static_assert(kConstexprDefaultConstructionWorks);
 
 constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
   // Array construction preserves the full literal payload.
-  AStr<8> str{"alpha"};
+  string<8> str{"alpha"};
 
   return !str.empty()
     && str.size() == 5u
@@ -45,7 +45,7 @@ static_assert(kConstexprLiteralConstructionWorks);
 
 constexpr bool kConstexprEmbeddedNulConstructionWorks{ []() constexpr {
   // Array construction keeps embedded NUL bytes as logical data.
-  AStr<4> str{"a\0b"};
+  string<4> str{"a\0b"};
 
   return !str.empty()
     && str.size() == 3u
@@ -59,7 +59,7 @@ static_assert(kConstexprEmbeddedNulConstructionWorks);
 
 constexpr bool kConstexprCtadWorks{ []() constexpr {
   // Deduction should still produce the exact-capacity string type.
-  AStr str{"hi"};
+  string str{"hi"};
 
   return str.size() == 2u
     && str.length() == 2u
@@ -70,9 +70,9 @@ static_assert(kConstexprCtadWorks);
 
 constexpr bool kConstexprCompareWorks{ []() constexpr {
   // Prepare lexicographic comparison inputs.
-  AStr<8> alpha{"alpha"};
-  AStr<4> bet{"bet"};
-  AStr<6> also_alpha{"alpha"};
+  string<8> alpha{"alpha"};
+  string<4> bet{"bet"};
+  string<6> also_alpha{"alpha"};
 
   return alpha.compare(bet) < 0
     && bet.compare(alpha) > 0
@@ -88,11 +88,11 @@ static_assert(kConstexprCompareWorks);
 
 constexpr bool kConstexprAtWorks{ []() constexpr {
   // Mutate through bounds-checked access.
-  AStr<8> str{"alpha"};
+  string<8> str{"alpha"};
   str.at(1) = 'o';
 
   // Re-read the result through a const reference.
-  AStr<8> const& const_str{ str };
+  string<8> const& const_str{ str };
 
   return str.view() == std::string_view("aopha")
     && const_str.at(0) == 'a'
@@ -102,7 +102,7 @@ static_assert(kConstexprAtWorks);
 
 constexpr bool kConstexprMutationWorks{ []() constexpr {
   // Interior NUL writes do not change the tracked size.
-  AStr<8> str{"abc"};
+  string<8> str{"abc"};
   str[1] = '\0';
 
   return str.view() == std::string_view("a\0c", 3)
@@ -113,7 +113,7 @@ static_assert(kConstexprMutationWorks);
 
 constexpr bool kConstexprResizeWorks{ []() constexpr {
   // Grow with a fill character.
-  AStr<8> str{"ab"};
+  string<8> str{"ab"};
   str.resize(4, 'x');
 
   bool const grew_ok{
@@ -132,7 +132,7 @@ static_assert(kConstexprResizeWorks);
 
 constexpr bool kConstexprAppendWorks{ []() constexpr {
   // Start from a short logical string.
-  AStr<8> str{"a"};
+  string<8> str{"a"};
 
   // Appending counted data preserves embedded NUL bytes.
   constexpr char suffix[]{ 'x', '\0', 'y' };
@@ -146,7 +146,7 @@ static_assert(kConstexprAppendWorks);
 
 constexpr bool kConstexprAssignWorks{ []() constexpr {
   // Replace with a counted string_view payload first.
-  AStr<8> str{"alpha"};
+  string<8> str{"alpha"};
   str.assign(std::string_view("m\0n", 3));
 
   bool const view_assign_ok{
@@ -164,7 +164,7 @@ constexpr bool kConstexprAssignWorks{ []() constexpr {
   };
 
   // Finally replace from another counted string object.
-  AStr<4> rhs{"u\0v"};
+  string<4> rhs{"u\0v"};
   str.assign(rhs);
 
   return view_assign_ok
@@ -176,11 +176,11 @@ static_assert(kConstexprAssignWorks);
 
 constexpr bool kConstexprCopyWorks{ []() constexpr {
   // Copy construct from embedded-NUL content.
-  AStr<8> original{"a\0b"};
-  AStr<8> copied{ original };
+  string<8> original{"a\0b"};
+  string<8> copied{ original };
 
   // Copy assign the same logical content into a different destination.
-  AStr<8> assigned{"zzz"};
+  string<8> assigned{"zzz"};
   assigned = original;
 
   return copied.size() == 3u
@@ -192,11 +192,11 @@ static_assert(kConstexprCopyWorks);
 
 constexpr bool kConstexprConvertingCopyWorks{ []() constexpr {
   // Copy into a smaller type that still has enough logical capacity.
-  AStr<8> large{"alpha"};
-  AStr<6> small{ large };
+  string<8> large{"alpha"};
+  string<6> small{ large };
 
   // Copy back into a larger destination through converting assignment.
-  AStr<8> assigned{};
+  string<8> assigned{};
   assigned = small;
 
   return small.size() == 5u
@@ -208,11 +208,11 @@ static_assert(kConstexprConvertingCopyWorks);
 
 constexpr bool kConstexprMoveWorks{ []() constexpr {
   // Move construction should transfer the logical content.
-  AStr<8> source{"move"};
-  AStr<8> moved{ std::move(source) };
+  string<8> source{"move"};
+  string<8> moved{ std::move(source) };
 
   // Move assignment should do the same and leave the source empty.
-  AStr<8> assigned{"xx"};
+  string<8> assigned{"xx"};
   assigned = std::move(moved);
 
   return source.empty()
@@ -224,10 +224,10 @@ static_assert(kConstexprMoveWorks);
 
 constexpr bool kConstexprStringViewWorks{ []() constexpr {
   // Construct directly from a counted string_view.
-  AStr<8> constructed{ std::string_view("a\0b", 3) };
+  string<8> constructed{ std::string_view("a\0b", 3) };
 
   // Then assign another counted string_view payload.
-  AStr<8> assigned{"zzz"};
+  string<8> assigned{"zzz"};
   assigned = std::string_view("q\0r", 3);
 
   return constructed.size() == 3u
@@ -241,15 +241,15 @@ constexpr bool kConstexprCStringSemanticsWork{ []() constexpr {
   // Show pointer construction will stop at first NUL character.
   constexpr char raw[]{ 'a', '\0', 'b', '\0' };
   char const* ptr{ raw };
-  AStr<8> constructed{ ptr };
+  string<8> constructed{ ptr };
 
   // Same as above and then appends after that.
-  AStr<8> appended{"x"};
+  string<8> appended{"x"};
   appended.append(ptr);
   appended.append("bc");
 
   // Shows assignment stops at first NUL character.
-  AStr<8> assigned{"zzz"};
+  string<8> assigned{"zzz"};
   assigned = ptr;
 
   return constructed.size() == 1u
@@ -263,7 +263,7 @@ static_assert(kConstexprCStringSemanticsWork);
 
 constexpr bool kConstexprMutableDataWorks{ []() constexpr {
   // Non-const data() provides a raw mutable view into logical bytes.
-  AStr<8> str{"abc"};
+  string<8> str{"abc"};
   char* ptr{ str.data() };
   ptr[1] = 'x';
 
@@ -274,7 +274,7 @@ static_assert(kConstexprMutableDataWorks);
 
 constexpr bool kConstexprCountAssignAndAppendWork{ []() constexpr {
   // Assign repeated characters first.
-  AStr<8> str{};
+  string<8> str{};
   str.assign(3u, 'q');
 
   // Then extend with another repeated sequence.
@@ -287,13 +287,13 @@ static_assert(kConstexprCountAssignAndAppendWork);
 
 constexpr bool kConstexprPlusEqualsWorks{ []() constexpr {
   // Start with one logical character.
-  AStr<9> str{"a"};
+  string<9> str{"a"};
   str += 'b';
   str += std::string_view("c\0d", 3);
   str += "e";
 
   // Finish by appending another counted string object.
-  AStr<3> tail{"f"};
+  string<3> tail{"f"};
   str += tail;
 
   return str.size() == 7u
@@ -303,7 +303,7 @@ static_assert(kConstexprPlusEqualsWorks);
 
 constexpr bool kConstexprClearWorks{ []() constexpr {
   // Clear should reset the logical state back to empty.
-  AStr<8> str{"clear"};
+  string<8> str{"clear"};
   str.clear();
 
   return str.empty()
@@ -314,8 +314,8 @@ static_assert(kConstexprClearWorks);
 
 constexpr bool kConstexprMemberSwapWorks{ []() constexpr {
   // Swap two strings with different logical sizes.
-  AStr<8> lhs{"left"};
-  AStr<8> rhs{"a"};
+  string<8> lhs{"left"};
+  string<8> rhs{"a"};
   lhs.swap(rhs);
 
   return lhs.size() == 1u
@@ -327,8 +327,8 @@ static_assert(kConstexprMemberSwapWorks);
 
 constexpr bool kConstexprFreeSwapWorks{ []() constexpr {
   // Exercise the free swap overload too.
-  AStr<8> lhs{"one"};
-  AStr<8> rhs{"xy"};
+  string<8> lhs{"one"};
+  string<8> rhs{"xy"};
   swap(lhs, rhs);
 
   return lhs.size() == 2u
@@ -340,10 +340,10 @@ static_assert(kConstexprFreeSwapWorks);
 
 constexpr bool kConstexprSubstringAndSearchWork{ []() constexpr {
   // Start from a string with repeated structure for search coverage.
-  AStr<8> str{"abcabc"};
+  string<8> str{"abcabc"};
 
   // Substring extraction should preserve counted semantics.
-  AStr<8> sub{ str.substr(2u, 3u) };
+  string<8> sub{ str.substr(2u, 3u) };
 
   // copy() writes only the requested logical slice.
   char buffer[3]{};
@@ -378,7 +378,7 @@ constexpr bool kConstexprSubstringAndSearchWork{ []() constexpr {
 }() };
 static_assert(kConstexprSubstringAndSearchWork);
 
-TEST(AStrConstexpr, SupportsCompileTimeEvaluation)
+TEST(StringConstexpr, SupportsCompileTimeEvaluation)
 {
   EXPECT_TRUE(kConstexprDefaultConstructionWorks);
   EXPECT_TRUE(kConstexprLiteralConstructionWorks);
@@ -404,10 +404,10 @@ TEST(AStrConstexpr, SupportsCompileTimeEvaluation)
   EXPECT_TRUE(kConstexprSubstringAndSearchWork);
 }
 
-TEST(AStrRuntime, PreservesStringSemantics)
+TEST(StringRuntime, PreservesStringSemantics)
 {
   // Start from a normal runtime string.
-  AStr<8> str{"hello"};
+  string<8> str{"hello"};
 
   EXPECT_EQ(5u, str.size());
   EXPECT_EQ(5u, str.length());
@@ -417,10 +417,10 @@ TEST(AStrRuntime, PreservesStringSemantics)
   EXPECT_STREQ("hello", str.c_str());
 }
 
-TEST(AStrRuntime, AtRejectsEndIndexAndThrowsPastIt)
+TEST(StringRuntime, AtRejectsEndIndexAndThrowsPastIt)
 {
   // at() follows std::string and rejects the end index.
-  AStr<8> str{"hello"};
+  string<8> str{"hello"};
   std::size_t end_index{ str.size() };
 
   EXPECT_THROW(
@@ -434,12 +434,12 @@ TEST(AStrRuntime, AtRejectsEndIndexAndThrowsPastIt)
 }
 
 #ifndef NDEBUG
-TEST(AStrRuntime, SubscriptRejectsEndIndexAndPastItInDebug)
+TEST(StringRuntime, SubscriptRejectsEndIndexAndPastItInDebug)
 {
   // operator[] guards the logical boundary with debug assertions.
   EXPECT_DEATH(
     []() {
-      AStr<8> str{"hello"};
+      string<8> str{"hello"};
       std::size_t end_index{ str.size() };
 
       str[end_index] = 'x';
@@ -449,7 +449,7 @@ TEST(AStrRuntime, SubscriptRejectsEndIndexAndPastItInDebug)
 
   EXPECT_DEATH(
     []() {
-      AStr<8> str{"hello"};
+      string<8> str{"hello"};
       std::size_t end_index{ str.size() };
 
       str[end_index + 1u] = 'x';
@@ -459,13 +459,13 @@ TEST(AStrRuntime, SubscriptRejectsEndIndexAndPastItInDebug)
 }
 #endif
 
-TEST(AStrRuntime, OverflowingMutatorsThrowLengthError)
+TEST(StringRuntime, OverflowingMutatorsThrowLengthError)
 {
   // Each mutator should reject growth past fixed capacity.
-  AStr<4> resize_str{"abc"};
-  AStr<4> push_str{"abc"};
-  AStr<4> append_str{"ab"};
-  AStr<4> assign_str{};
+  string<4> resize_str{"abc"};
+  string<4> push_str{"abc"};
+  string<4> append_str{"ab"};
+  string<4> assign_str{};
 
   EXPECT_THROW(
     resize_str.resize(4u),
@@ -485,14 +485,14 @@ TEST(AStrRuntime, OverflowingMutatorsThrowLengthError)
   );
 }
 
-TEST(AStrRuntime, ConvertingConstructionAndAssignmentThrowWhenTooLarge)
+TEST(StringRuntime, ConvertingConstructionAndAssignmentThrowWhenTooLarge)
 {
   // Converting operations still enforce fixed destination capacity.
-  AStr<8> source{"hello"};
-  AStr<4> destination{};
+  string<8> source{"hello"};
+  string<4> destination{};
 
   EXPECT_THROW(
-    static_cast<void>(AStr<4>{ source }),
+    static_cast<void>(string<4>{ source }),
     std::length_error
   );
   EXPECT_THROW(
@@ -501,10 +501,10 @@ TEST(AStrRuntime, ConvertingConstructionAndAssignmentThrowWhenTooLarge)
   );
 }
 
-TEST(AStrRuntime, MutableDataWritesLogicalBytes)
+TEST(StringRuntime, MutableDataWritesLogicalBytes)
 {
   // Mutate an existing logical byte through the raw buffer API.
-  AStr<8> str{"hello"};
+  string<8> str{"hello"};
   char* ptr{ str.data() };
 
   ptr[1] = 'a';
@@ -512,19 +512,19 @@ TEST(AStrRuntime, MutableDataWritesLogicalBytes)
   EXPECT_EQ(std::string_view("hallo"), str.view());
 }
 
-TEST(AStrRuntime, CStringOverloadsUseNullTerminatedSemantics)
+TEST(StringRuntime, CStringOverloadsUseNullTerminatedSemantics)
 {
   // Pointer-based overloads stop at the first NUL terminator.
   char const raw[]{ 'a', '\0', 'b', '\0' };
   char const* ptr{ raw };
-  AStr<8> constructed{ ptr };
+  string<8> constructed{ ptr };
 
   // Appending from a C string uses the same rule.
-  AStr<8> appended{"x"};
+  string<8> appended{"x"};
   appended.append(ptr);
 
   // Assignment from a C string does too.
-  AStr<8> assigned{"zzz"};
+  string<8> assigned{"zzz"};
   assigned = ptr;
 
   EXPECT_EQ(std::string_view("a"), constructed.view());

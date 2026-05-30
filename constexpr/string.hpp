@@ -1,7 +1,7 @@
-#ifndef CONSTEXPR_ASTR_HPP
-#define CONSTEXPR_ASTR_HPP
+#ifndef CONSTEXPR_STRING_HPP
+#define CONSTEXPR_STRING_HPP
 /**
- * @file AStr.hpp
+ * @file string.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Owns a fixed-capacity null-terminated counted string in
  *   constexpr-friendly storage, with an API modelled after `std::string`.
@@ -24,7 +24,7 @@ namespace Constexpr
   /**
    * @brief An owning fixed-capacity contiguous container for counted strings.
    *
-   * `AStr<N>` stores up to `N - 1` logical characters plus a trailing null
+   * `string<N>` stores up to `N - 1` logical characters plus a trailing null
    * terminator. The logical character sequence is the first `size()` bytes and
    * may include embedded `'\0'` values. The owned storage remains
    * null-terminated for C-string interop.
@@ -32,9 +32,9 @@ namespace Constexpr
    * @tparam N - Storage capacity including the trailing null terminator.
    */
   template <std::size_t N>
-  class AStr {
+  class string {
   public:
-    static_assert(N > 0, "AStr requires storage for at least a null terminator.");
+    static_assert(N > 0, "string requires storage for at least a null terminator.");
 
     using value_type = char;
     using size_type = std::size_t;
@@ -53,7 +53,7 @@ namespace Constexpr
     /**
      * @brief Constructs an empty string container.
      */
-    constexpr AStr() noexcept
+    constexpr string() noexcept
     : m_data{}
     , m_size(0)
     {
@@ -69,12 +69,12 @@ namespace Constexpr
      * @param s - Source string storage.
      */
     template <std::size_t M>
-    constexpr AStr(char const (&s)[M]) noexcept
+    constexpr string(char const (&s)[M]) noexcept
     : m_data{}
     , m_size(0)
     {
       static_assert(M <= N,
-        "AStr source string must fully fit in destination storage.");
+        "string source string must fully fit in destination storage.");
 
       assign_range(s, M - 1);
     }
@@ -94,7 +94,7 @@ namespace Constexpr
         !std::is_array<typename std::remove_reference<Ptr>::type>::value
         && std::is_convertible<Ptr, char const*>::value,
         int> = 0>
-    constexpr AStr(Ptr&& s)
+    constexpr string(Ptr&& s)
     : m_data{}
     , m_size(0)
     {
@@ -108,7 +108,7 @@ namespace Constexpr
      * @throws std::length_error if the source view is too large for this
      *   container.
      */
-    constexpr AStr(std::string_view sv)
+    constexpr string(std::string_view sv)
     : m_data{}
     , m_size(0)
     {
@@ -124,7 +124,7 @@ namespace Constexpr
      *
      * @param rhs - String container to copy.
      */
-    constexpr AStr(AStr const& rhs) noexcept
+    constexpr string(string const& rhs) noexcept
     : m_data{}
     , m_size(0)
     {
@@ -141,7 +141,7 @@ namespace Constexpr
      *   container.
      */
     template <std::size_t M>
-    constexpr AStr(AStr<M> const& rhs)
+    constexpr string(string<M> const& rhs)
     : m_data{}
     , m_size(0)
     {
@@ -154,7 +154,7 @@ namespace Constexpr
      *
      * @param rhs - String container to move from.
      */
-    constexpr AStr(AStr&& rhs) noexcept
+    constexpr string(string&& rhs) noexcept
     : m_data{}
     , m_size(0)
     {
@@ -170,9 +170,9 @@ namespace Constexpr
      * copied. Bytes beyond the logical end are left unspecified.
      *
      * @param rhs - String container to copy from.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      */
-    constexpr AStr& operator=(AStr const& rhs) noexcept {
+    constexpr string& operator=(string const& rhs) noexcept {
       assign_range(rhs.c_str(), rhs.size());
       return *this;
     }
@@ -183,12 +183,12 @@ namespace Constexpr
      *
      * @tparam M - Storage size of the source container.
      * @param rhs - String container to copy from.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      * @throws std::length_error if the source string is too large for this
      *   container.
      */
     template <std::size_t M>
-    constexpr AStr& operator=(AStr<M> const& rhs) {
+    constexpr string& operator=(string<M> const& rhs) {
       assign(rhs);
       return *this;
     }
@@ -197,9 +197,9 @@ namespace Constexpr
      * @brief Assigns the logical contents of another container by move.
      *
      * @param rhs - String container to move from.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      */
-    constexpr AStr& operator=(AStr&& rhs) noexcept {
+    constexpr string& operator=(string&& rhs) noexcept {
       if (this != &rhs) {
         assign_range(rhs.c_str(), rhs.size());
         rhs.clear();
@@ -211,11 +211,11 @@ namespace Constexpr
      * @brief Assigns the logical contents of a counted string view.
      *
      * @param sv - New logical character sequence.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      * @throws std::length_error if the source view is too large for this
      *   container.
      */
-    constexpr AStr& operator=(std::string_view sv) {
+    constexpr string& operator=(std::string_view sv) {
       assign(sv);
       return *this;
     }
@@ -224,11 +224,11 @@ namespace Constexpr
      * @brief Assigns the logical contents of a null-terminated C string.
      *
      * @param s - Null-terminated source string.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      * @throws std::length_error if the source string is too long for this
      *   container.
      */
-    constexpr AStr& operator=(char const* s) {
+    constexpr string& operator=(char const* s) {
       assign(s);
       return *this;
     }
@@ -469,7 +469,7 @@ namespace Constexpr
      */
     constexpr reference at(size_type i) {
       if (i >= size()) {
-        throw std::out_of_range("AStr::at: index out of range");
+        throw std::out_of_range("string::at: index out of range");
       }
       return m_data[i];
     }
@@ -486,7 +486,7 @@ namespace Constexpr
      */
     constexpr const_reference at(size_type i) const {
       if (i >= size()) {
-        throw std::out_of_range("AStr::at: index out of range");
+        throw std::out_of_range("string::at: index out of range");
       }
       return m_data[i];
     }
@@ -553,7 +553,7 @@ namespace Constexpr
      */
     constexpr void resize(size_type new_size, char fill = '\0') {
       if (new_size > capacity()) {
-        throw std::length_error("AStr::resize: new_size exceeds capacity");
+        throw std::length_error("string::resize: new_size exceeds capacity");
       }
 
       if (new_size > m_size) {
@@ -574,7 +574,7 @@ namespace Constexpr
      */
     constexpr void push_back(char ch) {
       if (m_size == capacity()) {
-        throw std::length_error("AStr::push_back: string is at capacity");
+        throw std::length_error("string::push_back: string is at capacity");
       }
 
       m_data[m_size] = ch;
@@ -636,7 +636,7 @@ namespace Constexpr
      *   exceed the container capacity.
      */
     constexpr void append(size_type count, char ch) {
-      check_append_fits(count, "AStr::append: append would exceed capacity");
+      check_append_fits(count, "string::append: append would exceed capacity");
 
       for (size_type i{ 0 }; i < count; ++i) {
         m_data[m_size + i] = ch;
@@ -655,7 +655,7 @@ namespace Constexpr
      *   container capacity.
      */
     template <std::size_t M>
-    constexpr void append(AStr<M> const& rhs) {
+    constexpr void append(string<M> const& rhs) {
       append_range(rhs.data(), rhs.size());
     }
 
@@ -667,7 +667,7 @@ namespace Constexpr
      *   container.
      */
     constexpr void assign(std::string_view sv) {
-      check_size_fits(sv.size(), "AStr::assign: source size exceeds capacity");
+      check_size_fits(sv.size(), "string::assign: source size exceeds capacity");
       assign_range(sv.data(), sv.size());
     }
 
@@ -680,7 +680,7 @@ namespace Constexpr
      */
     constexpr void assign(char const* s) {
       size_type const count{ cstring_length(s) };
-      check_size_fits(count, "AStr::assign: source size exceeds capacity");
+      check_size_fits(count, "string::assign: source size exceeds capacity");
       assign_range(s, count);
     }
 
@@ -693,7 +693,7 @@ namespace Constexpr
      *   container.
      */
     constexpr void assign(char const* ptr, size_type count) {
-      check_size_fits(count, "AStr::assign: source size exceeds capacity");
+      check_size_fits(count, "string::assign: source size exceeds capacity");
       assign_range(ptr, count);
     }
 
@@ -706,7 +706,7 @@ namespace Constexpr
      *   for this container.
      */
     constexpr void assign(size_type count, char ch) {
-      check_size_fits(count, "AStr::assign: source size exceeds capacity");
+      check_size_fits(count, "string::assign: source size exceeds capacity");
 
       for (size_type i{ 0 }; i < count; ++i) {
         m_data[i] = ch;
@@ -725,8 +725,8 @@ namespace Constexpr
      *   container.
      */
     template <std::size_t M>
-    constexpr void assign(AStr<M> const& rhs) {
-      check_size_fits(rhs.size(), "AStr::assign: source size exceeds capacity");
+    constexpr void assign(string<M> const& rhs) {
+      check_size_fits(rhs.size(), "string::assign: source size exceeds capacity");
       assign_range(rhs.data(), rhs.size());
     }
 
@@ -734,9 +734,9 @@ namespace Constexpr
      * @brief Appends one character sequence source in-place.
      *
      * @param ch - Character to append.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      */
-    constexpr AStr& operator+=(char ch) {
+    constexpr string& operator+=(char ch) {
       push_back(ch);
       return *this;
     }
@@ -745,11 +745,11 @@ namespace Constexpr
      * @brief Appends a counted string view in-place.
      *
      * @param sv - Character sequence to append.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      * @throws std::length_error if the appended view would exceed the container
      *   capacity.
      */
-    constexpr AStr& operator+=(std::string_view sv) {
+    constexpr string& operator+=(std::string_view sv) {
       append(sv);
       return *this;
     }
@@ -758,11 +758,11 @@ namespace Constexpr
      * @brief Appends a null-terminated C string in-place.
      *
      * @param s - Null-terminated character sequence to append.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      * @throws std::length_error if the appended string would exceed the
      *   container capacity.
      */
-    constexpr AStr& operator+=(char const* s) {
+    constexpr string& operator+=(char const* s) {
       append(s);
       return *this;
     }
@@ -772,12 +772,12 @@ namespace Constexpr
      *
      * @tparam M - Storage size of the source container.
      * @param rhs - String container to append.
-     * @return AStr& - Reference to this container.
+     * @return string& - Reference to this container.
      * @throws std::length_error if the appended string would exceed the
      *   container capacity.
      */
     template <std::size_t M>
-    constexpr AStr& operator+=(AStr<M> const& rhs) {
+    constexpr string& operator+=(string<M> const& rhs) {
       append(rhs);
       return *this;
     }
@@ -803,7 +803,7 @@ namespace Constexpr
      *   `0` if both strings are equal.
      */
     template <size_type M>
-    constexpr int compare(AStr<M> const& rhs) const noexcept {
+    constexpr int compare(string<M> const& rhs) const noexcept {
       return compare(rhs.view());
     }
 
@@ -812,17 +812,17 @@ namespace Constexpr
      *
      * @param pos - Starting position of the substring.
      * @param count - Maximum number of characters to copy.
-     * @return AStr - Substring copy with the same storage capacity.
+     * @return string - Substring copy with the same storage capacity.
      * @throws std::out_of_range if the starting position is past the logical
      *   end of the string.
      */
-    constexpr AStr substr(size_type pos = 0u, size_type count = npos) const {
+    constexpr string substr(size_type pos = 0u, size_type count = npos) const {
       if (pos > size()) {
-        throw std::out_of_range("AStr::substr: pos > size()");
+        throw std::out_of_range("string::substr: pos > size()");
       }
 
       size_type const actual_count{ clamp_count(pos, count) };
-      AStr result{};
+      string result{};
       result.assign_range(m_data.data() + pos, actual_count);
       return result;
     }
@@ -839,7 +839,7 @@ namespace Constexpr
      */
     constexpr size_type copy(char* dest, size_type count, size_type pos = 0u) const {
       if (pos > size()) {
-        throw std::out_of_range("AStr::copy: pos > size()");
+        throw std::out_of_range("string::copy: pos > size()");
       }
 
       size_type const actual_count{ clamp_count(pos, count) };
@@ -1041,7 +1041,7 @@ namespace Constexpr
      *
      * @param rhs - The container to swap with.
      */
-    constexpr void swap(AStr& rhs) noexcept {
+    constexpr void swap(string& rhs) noexcept {
       size_type const old_size{ m_size };
       size_type const rhs_size{ rhs.m_size };
       size_type const limit{ old_size < rhs_size ? rhs_size : old_size };
@@ -1141,7 +1141,7 @@ namespace Constexpr
      *   the container capacity.
      */
     constexpr void append_range(char const* src, size_type count) {
-      check_append_fits(count, "AStr::append: append would exceed capacity");
+      check_append_fits(count, "string::append: append would exceed capacity");
       for (size_type i{ 0 }; i < count; ++i) {
         m_data[m_size + i] = src[i];
       }
@@ -1162,10 +1162,10 @@ namespace Constexpr
   };
 
   template <std::size_t N>
-  AStr(std::array<char, N>) -> AStr<N>;
+  string(std::array<char, N>) -> string<N>;
 
   template <std::size_t N>
-  AStr(char const (&)[N]) -> AStr<N>;
+  string(char const (&)[N]) -> string<N>;
 
   /**
    * @brief Checks whether two string containers are equal.
@@ -1177,8 +1177,8 @@ namespace Constexpr
    * @return bool - `true` if both strings are equal.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator==(AStr<LhsN> const& lhs,
-    AStr<RhsN> const& rhs) noexcept
+  inline constexpr bool operator==(string<LhsN> const& lhs,
+    string<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) == 0;
   }
@@ -1193,8 +1193,8 @@ namespace Constexpr
    * @return bool - `true` if the strings differ.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator!=(AStr<LhsN> const& lhs,
-    AStr<RhsN> const& rhs) noexcept
+  inline constexpr bool operator!=(string<LhsN> const& lhs,
+    string<RhsN> const& rhs) noexcept
   {
     return !(lhs == rhs);
   }
@@ -1210,8 +1210,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs < rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator<(AStr<LhsN> const& lhs,
-    AStr<RhsN> const& rhs) noexcept
+  inline constexpr bool operator<(string<LhsN> const& lhs,
+    string<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) < 0;
   }
@@ -1227,8 +1227,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs <= rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator<=(AStr<LhsN> const& lhs,
-    AStr<RhsN> const& rhs) noexcept
+  inline constexpr bool operator<=(string<LhsN> const& lhs,
+    string<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) <= 0;
   }
@@ -1244,8 +1244,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs > rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator>(AStr<LhsN> const& lhs,
-    AStr<RhsN> const& rhs) noexcept
+  inline constexpr bool operator>(string<LhsN> const& lhs,
+    string<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) > 0;
   }
@@ -1261,8 +1261,8 @@ namespace Constexpr
    * @return bool - `true` if `lhs >= rhs`.
    */
   template <std::size_t LhsN, std::size_t RhsN>
-  inline constexpr bool operator>=(AStr<LhsN> const& lhs,
-    AStr<RhsN> const& rhs) noexcept
+  inline constexpr bool operator>=(string<LhsN> const& lhs,
+    string<RhsN> const& rhs) noexcept
   {
     return lhs.compare(rhs) >= 0;
   }
@@ -1275,9 +1275,9 @@ namespace Constexpr
    * @param rhs - Right-hand string container.
    */
   template <std::size_t N>
-  inline constexpr void swap(AStr<N>& lhs, AStr<N>& rhs) noexcept {
+  inline constexpr void swap(string<N>& lhs, string<N>& rhs) noexcept {
     lhs.swap(rhs);
   }
 } // namespace Constexpr
 
-#endif // CONSTEXPR_ASTR_HPP
+#endif // CONSTEXPR_STRING_HPP

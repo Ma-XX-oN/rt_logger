@@ -1,15 +1,15 @@
-#ifndef CONSTEXPR_NUM_TO_ASTR_HPP
-#define CONSTEXPR_NUM_TO_ASTR_HPP
+#ifndef CONSTEXPR_NUM_TO_STRING_HPP
+#define CONSTEXPR_NUM_TO_STRING_HPP
 
 /**
- * @file num_to_AStr.hpp
+ * @file num_to_string.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
- * @brief Formats a number into a constexpr AStr object.
+ * @brief Formats a number into a constexpr string object.
  * @version 0.1
  * @date 2026-05-24
- * 
+ *
  * @copyright Copyright (c) 2026
- * 
+ *
  * NODE: Incomplete
  */
 #include <cstdint>
@@ -28,14 +28,14 @@ enum eNumFmt : std::uint8_t {
   ShowLeadingBase           = 0b00000100, // 0x - hex, 0o - octal, 0b - binary. Only when BaseMask not 0.
   ShowPlusSign              = 0b00000100, // Use '+' for non negative values when signed number and BaseMask is 0.
   ShowUppercase             = 0b00001000, // Only meaningful for hex
-  
+
   AlignRight                = 0b00010000, // 0 = left, 1 = right
-  
+
   // Base 10 - ShowLeadingBase has no effect
   PadWithSpace              = 0b00100000, // 0 = '0', 1 = ' '. Only when AlignRight is set.
   SignNextToNumber          = 0b01000000, // 0 = Aligned left, 1 = next to number.  Only when AlignRight is set.
   Unused                    = 0b10000000,
-  
+
   // Not base 10
   //  AlignRight && ShowLeadingBase &&  PadWithSpace => 0x next to min width number
   //  AlignRight && ShowLeadingBase && !PadWithSpace => 0x left most of field
@@ -100,7 +100,7 @@ namespace impl {
 
   /**
    * @brief Gets the max number of characters to store string rep of enum value.
-   * 
+   *
    * @tparam Num - Number to display as number.
    * @tparam NumFmt - Info stating how to format \p Num.
    * @return std::size_t - Size of stringized number, including NUL.
@@ -123,7 +123,7 @@ namespace impl {
    * @brief Reverses elements in an array.
    *
    * Using this because it's constexpr and runs in C++17.
-   *  
+   *
    * Taken from https://en.cppreference.com/cpp/algorithm/reverse
    *
    * @tparam BidirIt - Bidirectional iterator type.
@@ -135,14 +135,14 @@ namespace impl {
   void reverse(BidirIt first, BidirIt last)
   {
     using iter_cat = typename std::iterator_traits<BidirIt>::iterator_category;
-    
+
     // Tag dispatch, e.g. calling reverse_impl(first, last, iter_cat()),
     // can be used in C++14 and earlier modes.
     if constexpr (std::is_base_of_v<std::random_access_iterator_tag, iter_cat>)
     {
       if (first == last)
         return;
-      
+
       for (--last; first < last; (void)++first, --last)
         std::iter_swap(first, last);
     }
@@ -333,8 +333,8 @@ namespace impl {
  *         with \c <NumType,eNumFmt> template parameters to help prevent this
  *         issue.
  *
- * @tparam T - Integer type of value to make into a string. 
- * @param value - value to make into a string. 
+ * @tparam T - Integer type of value to make into a string.
+ * @param value - value to make into a string.
  * @return std::array<char, N> - Storage of string representation.
  */
 template <eNumFmt NumFmt, std::size_t N, typename T
@@ -360,4 +360,4 @@ constexpr std::array<char, N> to_str_as_arr(T value)
   return str;
 }
 
-#endif // CONSTEXPR_NUM_TO_ASTR_HPP
+#endif // CONSTEXPR_NUM_TO_STRING_HPP
