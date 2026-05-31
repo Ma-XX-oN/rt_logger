@@ -339,7 +339,8 @@ enum eEnumStorageType : std::uint8_t {
   UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
 
   // states how group_bitmask, bitmask and enum_value are stored
-  UsingDints = 0x08,
+  CompressBitmask   = 0x08, // Encode as dint
+  CompressEnumValue = 0x10, // Condense and encode as dint
 };
 ```
 
@@ -354,6 +355,34 @@ This format makes scope explicit in each `GroupIf*` command. The block's
 `bitmask` replaces the earlier idea of a separate `SetMaskValue` command, so the
 scope used by a conditional block is visible at the block header instead of
 being ambient mutable state.
+
+The command set is:
+
+```c++
+enum eEnumCommand : std::uint8_t {
+  OpCodeMask         = 0b1110'0000,
+  PayloadMask        = 0b0001'1111,
+
+  Terminate          = 0 << 5,  // End of stream if stream length not known.
+
+  Named              = 1 << 5,  // Specifies a list of pairs.
+  
+  Numeric            = 2 << 5,  // Specifies name for bits for current bitmask.
+   FmtRightShiftBits = 1 << 0,  //   Shift bits so least significant bits coinciding with bitmask are at the 0th bit.
+   FmtPackBits       = 1 << 1,  //   Condense bits coinciding with bitmask.
+   FmtIsSigned       = 1 << 2,  //   Sign extend bit coinciding with most significant bit of bitmask.
+   Unused            = 1 << 3,  //   Unused Numeric/GroupIfNumeric flag.
+
+  GroupIf            = 3 << 5,  // If group_bitmask set, use bitmask on following commands.
+  GroupIfNamed       = 4 << 5,  // If group_bitmask set, use bitmask on following pairs.
+  ContinueScope      = 5 << 5,  // Continue GroupIf/GroupIfNamed scope.
+  Else               = 6 << 5,  // Continue GroupIf/GroupIfNamed scope as else group.
+
+  GroupIfNumeric     = 7 << 5,  // If group_bitmask set, specify name for bits for current bitmask.
+   Negate            = 1 << 4,  //   Negates GroupIfNumeric, so that it acts as an Else.
+   // Can also take Fmt* flags.
+};
+```
 
 ##### Enum Stream Specification
 
@@ -378,7 +407,7 @@ The commands are:
 | `Numeric` | `Format` | `bitmask`, `name` | Emits a numeric representation of `value & bitmask` using the selected format. |
 | `GroupIf` | `If_cmd_count` | `group_bitmask`, `bitmask`, `command`, ... | If `(value & group_bitmask) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands. |
 | `GroupIfNamed` | `If_pair_count` | `group_bitmask`, `bitmask`, `pair`, ... | Conditional `Named` block in a nested scope. |
-| `GroupIfNumeric` | `Format` and optional `Negate` | `group_bitmask`, `bitmask`, `name` | Conditional `Numeric` block in a nested scope. `Negate` makes the numeric output belong to the `else` branch instead of the `if` branch. |
+| `GroupIfNumeric` | `Format` and optional `Negate` | `group_bitmask`, `bitmask`, `name` | Conditional `Numeric` block in a nested scope. `Negate` makes the numeric output belong to the `else` branch instead of the `if` branch, so `GroupIfNumeric` does not use a separate `Else`. |
 | `Else` | `Else_pair_count` or `Else_cmd_count` | `pair`, ... or `command`, ... | Alternate branch for the immediately preceding `GroupIf` or `GroupIfNamed` block. The `Else` branch uses the same block scope `bitmask` as the corresponding `if` branch. |
 | `ContinueScope` | `Cont_pair_count` or `Cont_cmd_count` | `pair`, ... or `command`, ... | Extends the immediately preceding scope body when more pairs or commands are needed than fit in the originating count field. |
 
@@ -394,7 +423,10 @@ The encoded parameters are:
 | `If_cmd_count` | Number of commands following `GroupIf` (0-31). |
 | `Else_cmd_count` | Number of commands following `Else` for a command branch (1-32). |
 | `Cont_cmd_count` | Number of commands following `ContinueScope` for a command branch (1-32). |
-| `Format` | Numeric formatting mode. |
+| `Format` | Numeric formatting mode. A bitwise OR of the `Fmt*` flags below. |
+| `FmtRightShiftBits` | If the least significant bit selected by `bitmask` is not bit 0, shift the masked value right until the selected range starts at bit 0. |
+| `FmtPackBits` | Pack the selected bits densely into the low bits in least-significant-bit order. |
+| `FmtIsSigned` | After shifting or packing, treat the most significant extracted bit as the sign bit and sign-extend it. |
 | `Negate` | Makes `GroupIfNumeric` refer to the `else` branch. |
 
 Execution rules:
@@ -417,8 +449,14 @@ Execution rules:
    corresponding conditional branch.
 9. `ContinueScope` continues the current branch at the same nesting level and
    with the same scope bitmask. It does not introduce a new condition.
-10. `Else` and `ContinueScope` are only valid immediately after a compatible
-    branch of the same kind.
+10. A conditional scope remains open only while the next command continues that
+    same branch. I.e. `GroupIf` and `GroupIfNamed` can be continued using `Else`
+    or `ContinueScope`.
+11. `Else` is only valid immediately after `GroupIf` or `GroupIfNamed`. It is
+    invalid after `GroupIfNumeric`; use `Negate` there instead.
+12. `ContinueScope` is only valid immediately after the branch it extends. A
+    named branch may be extended only by more `pair`s, and a command branch may
+    be extended only by more `command`s.
 
 Because nested scope bitmasks must always narrow their parent scope, malformed
 or corrupted streams are easier to detect than with a model that relies on a
