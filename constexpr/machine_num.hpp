@@ -1,12 +1,12 @@
 /**
  * @file machine_num.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
- * @brief Encodes/decodes integers/enums into/from a std::byte buffer in machine
+ * @brief Encodes/decodes numbers/enums into/from a std::byte buffer in machine
  *   endianness.
  * @version 0.1
  * @date 2026-05-21
  *
- * Allows a buffer to store/retrieve integers/enums in the endianness of the
+ * Allows a buffer to store/retrieve numbers/enums in the endianness of the
  * current machine.
  *
  * @copyright Copyright (c) 2026
@@ -76,10 +76,10 @@ std::size_t space_available(std::size_t N, std::size_t offset) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Store one or more integers or enums
+// Store one or more numbers or enums
 ////////////////////////////////////////////////////////////////////////////////
 /**
- * @brief 0. Store one or more integers or enums to \p b_dst buffer at \p
+ * @brief 0. Store one or more numbers or enums to \p b_dst buffer at \p
  *   offset.
  *
  * @tparam T - Type being stored.
@@ -106,7 +106,7 @@ std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t& offset, T
 }
 
 /**
- * @brief 0. Store one or more integers or enums to \p b_dst buffer at \p offset
+ * @brief 0. Store one or more numbers or enums to \p b_dst buffer at \p offset
  *   (rvalue-offset overload).  Delegates to the lvalue overload.
  *
  * @tparam T - Type being stored.
@@ -127,7 +127,7 @@ std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t&& offset, 
 }
 
 /**
- * @brief 1. Store one or more integers or enums to \p b_dst buffer at \p
+ * @brief 1. Store one or more numbers or enums to \p b_dst buffer at \p
  * offset.
  *
  * @tparam T - Type being stored.
@@ -146,7 +146,7 @@ std::size_t encode_value(std::byte* b_dst, std::size_t N, std::size_t& offset, T
 }
 
 /**
- * @brief 1. Store one or more integers or enums to \p b_dst buffer at \p offset
+ * @brief 1. Store one or more numbers or enums to \p b_dst buffer at \p offset
  *   (rvalue-offset overload).  Delegates to the lvalue overload.
  *
  * @tparam T - Type being stored.
@@ -204,7 +204,7 @@ std::size_t encode_value(std::byte (&b_dst)[N], std::size_t&& offset, T const& v
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Retrieve one or more integers or enums
+// Retrieve one or more numbers or enums
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
