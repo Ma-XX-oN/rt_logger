@@ -12,6 +12,7 @@
     - [C-String](#c-string)
       - [Ensuring Generated FString CRCs Are Unique](#ensuring-generated-fstring-crcs-are-unique)
     - [Enum Definition Stream](#enum-definition-stream)
+      - [Enum Stream Specification](#enum-stream-specification)
   - [Packet Design](#packet-design)
     - [General Block Format](#general-block-format)
       - [Field 2: Sequence And Continuation Flags](#field-2-sequence-and-continuation-flags)
@@ -55,7 +56,7 @@ block leaves off.
 ## Dependencies to build
 
 ```bash
-# Install cmake, ninga and gtest dependencies
+# Install cmake, ninja and gtest dependencies
 pacman -S \
   mingw-w64-clang-x86_64-cmake \
   mingw-w64-clang-x86_64-ninja \
@@ -337,7 +338,7 @@ enum eEnumStorageType : std::uint8_t {
    Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
   UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
 
-  // states how inline_bit_mask, active_bit_mask and enum_value are stored
+  // states how group_bitmask, active_bitmask and enum_value are stored
   UsingDints = 0x08,
 };
 ```
@@ -348,51 +349,58 @@ describe how enum values are named, grouped, and formatted.
 The enum definition stream is interpreted using the following command set:
 
 ```c++
-enum eDefineEnum : std::uint8_t {
+enum eEnumCommand : std::uint8_t {
   // MASKS
   //
   // Partitions the bit space
-  OpcodeMask      = 0b1110'0000, // Mask for extracting opcode.
+  OpcodeMask       = 0b1110'0000, // Mask for extracting primary opcode.
+  PayloadMask      = 0b0001'1111, // Primary op-code specific payload.
 
-  PayloadMask     = 0b0001'1111, // Op-code specific payload.
+  Opcode2Mask      = 0b0001'0000, // Mask for extracting secondary opcode if primary opcode is Use2ndOpcodes.
+  Payload2Mask     = 0b0000'1111, // Secondary op-code specific payload.
+  
   
   // INTERPRETATION OF OPCODE
   
-  Invalid         = 0b0000'0000, // Catches zero/uninitialized/corrupt command bytes.
-  
-  Named           = 0b0010'0000, // extracted = ((active_bit_mask ? active_bit_mask : inline_bit_mask) & value);
-                                 // pair_count = (PayloadMask & cmd_byte) + 1;
-                                 // - Followed by pair_count pairs.
-                                 // - To specify more than 32 names, just create another Named command on the same
-                                 //   level.
-                                 //
-                                 // for (int i = 0; i < pair_count; ++i) {
-                                 //   if (extracted == std::get<0>(pair)) {
-                                 //     auto const& Name = std::get<1>(pair);
-                                 //     if (extracted) {
-                                 //       // add to non-zero value queue.  Allows display grouping as "A | Name".
-                                 //     } else {
-                                 //       // add to zero value queue.  Allows display grouping as "A, Name"
-                                 //     }
-                                 //     break;
-                                 //   }
-                                 // }
+  Named             = 0 << 5, // extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
+                              // pair_count = (PayloadMask & cmd_byte) + 1;
+                              // - Followed by pair_count pairs.
+                              // - To specify more than 32 pairs, just create another Named command on the same
+                              //   level.
+                              //
+                              // for (int i = 0; i < pair_count; ++i) {
+                              //   if (extracted == std::get<0>(pair)) {
+                              //     auto const& Name = std::get<1>(pair);
+                              //     if (extracted) {
+                              //       // add to non-zero value queue.  Allows display grouping as "A | Name".
+                              //     } else {
+                              //       // add to zero value queue.  Allows display grouping as "A, Name"
+                              //     }
+                              //     break;
+                              //   }
+                              // }
                                  
-  Numeric         = 0b0100'0000, // extracted = (inline_bit_mask & value);
-                                 // format = PayloadMask & cmd_byte;
-                                 //   - Followed by a name to name the field.
-                                 //   - Does NOT use active_bit_mask as that would add additional overhead as mask would
-                                 //     be used only once.
-                                 //   - If there is a 0 in the inline_bit_mask's least significant bit, keep shifting
-                                 //     value and mask right till it's a 1.
-                                 //   - Bits are packed densely into the low bits in least-significant-bit order.
-                                 //   - After packing, the most significant extracted bit becomes the sign bit and is
-                                 //     sign extended.
-                                 //   - format can contain up to 5 independent formatting rules.
-                                 //
-                                 //   formatted_value = format_value(extracted, format);
-                                 //   // add (name, value) pair to numeric queue.
-                                 //   // Allows display grouping as "A, Name = Value"
+  Numeric           = 1 << 5, // extracted = (group_bitmask & value);
+                              // format = Payload2Mask & cmd_byte;
+                              //   - Followed by a name to name the field.
+                              //   - Does NOT use active_bitmask as that would add additional overhead as mask would
+                              //     be used only once.
+                              //   - Format can contain up to 4 independent formatting rules.  Such rules could be:
+
+                              //     If there is a 0 in the group_bitmask's least significant bit, keep shifting
+                              //     value and mask right till it's a 1.
+  FmtRightShiftBits    = 1,
+                              //     Bits are packed densely into the low bits in least-significant-bit order.
+  FmtPackBits          = 2,
+                              //     After packing, the most significant extracted bit becomes the sign bit and is
+                              //     sign extended.
+  FmtIsSigned          = 4,
+  FmtUnused            = 8,
+                              //
+                              //   formatted_value = format_value(extracted, format);
+                              //   // add (name, value) pair to numeric queue.
+                              //   // Allows display grouping as "A, Name = Value"
+
 
   // CONDITIONALS
   //
@@ -400,81 +408,142 @@ enum eDefineEnum : std::uint8_t {
   // different representation, nest the groups.  This is slightly clunky, but optimizes the stream size for the more
   // common cases.
 
-  GroupIf         = 0b0110'0000, // select_group = (inline_bit_mask & value);
-                                 // cmd_count = (PayloadMask & cmd_byte) + 1;
-                                 // if ( select_group) {
-                                 //   // Execute the following cmd_count commands.
-                                 // } else {
-                                 //   // Advance past cmd_count commands without executing them.
-                                 // }
+  GroupIf           = 2 << 5, // select_group_bitmask = (group_selector_bitmask & value);
+                              // cmd_count = (PayloadMask & cmd_byte) + 1;
+                              // if ( select_group_bitmask) {
+                              //   // Execute the following cmd_count commands.
+                              // } else {
+                              //   // Advance past cmd_count commands without executing them.
+                              // }
                                  
-  GroupIfNot      = 0b1000'0000, // select_group = (inline_bit_mask & value);
-                                 // cmd_count = (PayloadMask & cmd_byte) + 1;
-                                 // if (!select_group) {
-                                 //   // Execute the following cmd_count commands.
-                                 // } else {
-                                 //   // Advance past cmd_count commands without executing them.
-                                 // }
+  GroupIfNot        = 3 << 5, // select_group_bitmask = (group_selector_bitmask & value);
+                              // cmd_count = (PayloadMask & cmd_byte) + 1;
+                              // if (!select_group_bitmask) {
+                              //   // Execute the following cmd_count commands.
+                              // } else {
+                              //   // Advance past cmd_count commands without executing them.
+                              // }
   
   // COMBINED CONDITIONALS
   //
-  // Though not explicitly required, these micro-optimize the resulting stream length.
+  // Though not explicitly required, the rest micro-optimize the resulting stream length.
   
-  GroupIfNamed    = 0b1010'0000, // extracted = ((active_bit_mask ? active_bit_mask : inline_bit_mask) & value);
-                                 // select_group = (inline_bit_mask & value);
-                                 // pair_count = (PayloadMask & cmd_byte) + 1;
-                                 // if ( select_group) {
-                                 //   // Compare extracted against pair_count pairs as specified for Named.
-                                 // } else {
-                                 //   // Advance past pair_count pairs without checking them.
-                                 // }
+  GroupIfNamed      = 4 << 5, // select_group_bitmask = (group_selector_bitmask & value);
+                              // pair_count = (PayloadMask & cmd_byte) + 1;
+                              // if ( select_group_bitmask) {
+                              //   extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
+                              //   // Compare extracted against pair_count pairs as specified for Named.
+                              // } else {
+                              //   // Advance past pair_count pairs without checking them.
+                              // }
 
-  GroupIfNotNamed = 0b1100'0000, // extracted = ((active_bit_mask ? active_bit_mask : inline_bit_mask) & value);
-                                 // select_group = (inline_bit_mask & value);
-                                 // pair_count = (PayloadMask & cmd_byte) + 1;
-                                 // if (!select_group) {
-                                 //   // Compare extracted against pair_count pairs as specified for Named.
-                                 // } else {
-                                 //   // Advance past pair_count pairs without checking them.
-                                 // }
+  GroupIfNotNamed   = 5 << 5, // select_group_bitmask = (group_selector_bitmask & value);
+                              // pair_count = (PayloadMask & cmd_byte) + 1;
+                              // if (!select_group_bitmask) {
+                              //   extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
+                              //   // Compare extracted against pair_count pairs as specified for Named.
+                              // } else {
+                              //   // Advance past pair_count pairs without checking them.
+                              // }
+  
+  SetMaskValue      = 6 << 5, // Sets active_bitmask.
+                              // - Followed by active_bitmask value.
+                              //
+                              // active_bitmask is initially 0.
+                              //
+                              // When entering a GroupIf/GroupIfNot body, active_bitmask is pushed onto a stack and
+                              // restored when leaving the scope.
+                              //
+                              // This changes opcode's parameters include a group_bitmask:
+                              //
+                              //  | opcode \ abm == 0 | true  | false |
+                              //  |-------------------|-------|-------|
+                              //  | Named             | true  | false |
+                              //  | Numeric           | true  | true  |
+                              //  | GroupIf           | true  | true  |
+                              //  | GroupIfNot        | true  | true  |
+                              //  | GroupIfNamed      | true  | false |
+                              //  | GroupIfNotNamed   | true  | false |
+                              //  | GroupIfNumeric    | true  | true  |
+                              //  | GroupIfNotNumeric | true  | true  |
+                              //
+                              // All except Named always have an independent parameter.
+                              //
+                              // Named only takes parameters if active_bitmask is not 0.
 
-  SetMask         = 0b1110'0000, // Sets active_bit_mask.
-                                 // - Followed by active_bit_mask value.
-                                 //
-                                 // active_bit_mask is initially 0.
-                                 //
-                                 // When entering a GroupIf/GroupIfNot body, active_bit_mask is pushed onto a stack and
-                                 // restored when leaving the scope.
-                                 //
-                                 // This changes the number of the opcode's parameters that are expected:
-                                 //
-                                 //  | opcode \ abm == 0 | true  | false |
-                                 //  |-------------------|-------|-------|
-                                 //  | Named             |   1   |   0   |
-                                 //  | Numeric           |   1   |   1   |
-                                 //  | GroupIf           |   1   |   1   |
-                                 //  | GroupIfNot        |   1   |   1   |
-                                 //  | GroupIfNamed      |   1   |   0   |
-                                 //  | GroupIfNotNamed   |   1   |   0   |
-                                 //
-                                 // Numeric, GroupIf and GroupIfNot always have an independent parameter.
-                                 //
-                                 // SetMask only takes parameters if PayloadMask is not 0.  This
-                                 // means 31 very common bit masks can be specified inline in the
-                                 // command byte directly.
+  Use2ndOpcodes     = 7 << 5, // Use secondary opcodes
+
+  GroupIfNumeric    = 0 << 4, // select_group_bitmask = (group_selector_bitmask & value);
+                              // extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
+                              // pair_count = (PayloadMask & cmd_byte) + 1;
+                              // if ( select_group_bitmask) {
+                              //   // Compare extracted against pair_count pairs as specified for Named.
+                              // } else {
+                              //   // Advance past pair_count pairs without checking them.
+                              // }
+
+  GroupIfNotNumeric = 1 << 4, // extracted = (group_bitmask & value);
+                              // select_group_bitmask = (group_selector_bitmask & value);
+                              // pair_count = (PayloadMask & cmd_byte) + 1;
+                              // if (!select_group_bitmask) {
+                              //   // Compare extracted against pair_count pairs as specified for Named.
+                              // } else {
+                              //   // Advance past pair_count pairs without checking them.
+                              // }
 };
 ```
 
-In length specified streams, `Invalid` is an error. In non-length specified
-streams, `Invalid` terminates the command stream. In the case of the
-**EnumBlock**, the stream is length specified.
+The length of the enum stream must be specified to know when the last terminal
+has been reached.
 
-To compress further, `inline_bit_mask`, `active_bit_mask` and `enum_value`
-values can be represented as dint types.  To get the best compression, place
-larger groups of bit patterns in the most significant area of the enum value.
+Named specifiers should come *before* Numeric, as once a Numeric is found for a
+bit set, Named items using those same bits would be ignored.
 
-Also, Named specifiers should come *before* Numeric, as once a Numeric is found
-for a bit set, Named would be ignored.
+##### Enum Stream Specification
+
+An enum definition stream consists of one command following another.  Here are
+the types of the parameters.
+
+| type                   | specified by       |
+|------------------------|--------------------|
+| command                | eEnumCommand       |
+| name                   | c-string           |
+| pair                   | (enum_value, name) |
+| group_bitmask          | number             |
+| group_selector_bitmask | number             |
+
+A command consists of either:
+
+1. `cmd_byte, group_bitmask, parameters`
+2. `cmd_byte, group_selector_bitmask, parameters`
+3. `cmd_byte, parameters`
+
+Most commands specify how many commands or pairs follow the cmd_byte.
+
+The commands and their parameters are:
+
+| command           | embedded parameter | external parameters                            |
+|-------------------|--------------------|------------------------------------------------|
+| Named             | Number of pairs    | *group_bitmask, pairs                          |
+| Numeric           | Format             |  group_bitmask, name                           |
+| GroupIf           | Number of commands |  group_selector_bitmask, command, ...          |
+| GroupIfNot        | Number of commands |  group_selector_bitmask, command, ...          |
+| GroupIfNamed      | Number of pairs    |  group_selector_bitmask, *group_bitmask, pairs |
+| GroupIfNotNamed   | Number of pairs    |  group_selector_bitmask, *group_bitmask, pairs |
+| GroupIfNumeric    | Format             |  group_selector_bitmask, group_bitmask, name   |
+| GroupIfNotNumeric | Format             |  group_selector_bitmask, group_bitmask, name   |
+| SetMaskValue      | Unused (0)         |  group_bitmask                                 |
+
+- It is invalid for a `group_bitmask` or a `group_selector_bitmask` to be 0.
+- `*group_bitmask` is only specified if the `active_bitmask` is 0.
+- Using `SetMaskValue` to set the `active_bitmask` can reduce the length of the
+  stream.  More savings is possible by using [`dints`](#dynamic-integers-dint) for
+  the `*_bitmask`s and the `enum_value`s.
+- The length of the stream should be known ahead of time to know when the
+  program ends.  If warranted, since `group_bitmask` must be a non-zero value to
+  be valid, it is possible to use `Numeric` with a zero `group_bitmask`, or any
+  of the `GroupIf*` commands with a zero `group_selector_bitmask` to indicate
+  the end of the stream.
 
 ### Packet Design
 
