@@ -338,212 +338,93 @@ enum eEnumStorageType : std::uint8_t {
    Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
   UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
 
-  // states how group_bitmask, active_bitmask and enum_value are stored
+  // states how group_bitmask, bitmask and enum_value are stored
   UsingDints = 0x08,
 };
 ```
 
-An enum definition stream uses this storage type and bytecode command set to
-describe how enum values are named, grouped, and formatted.
+An enum definition stream uses this storage type and a compact descriptor
+program to describe how enum values are named, grouped, and formatted.
 
-The enum definition stream is interpreted using the following command set:
+The stream is processed sequentially. If the stream length is known externally,
+decoding may stop at the end of the stream. Otherwise the stream must end with a
+`Terminate` command.
 
-```c++
-enum eEnumCommand : std::uint8_t {
-  // MASKS
-  //
-  // Partitions the bit space
-  OpcodeMask       = 0b1110'0000, // Mask for extracting primary opcode.
-  PayloadMask      = 0b0001'1111, // Primary op-code specific payload.
-
-  Opcode2Mask      = 0b0001'0000, // Mask for extracting secondary opcode if primary opcode is Use2ndOpcodes.
-  Payload2Mask     = 0b0000'1111, // Secondary op-code specific payload.
-  
-  
-  // INTERPRETATION OF OPCODE
-  
-  Named             = 0 << 5, // extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
-                              // pair_count = (PayloadMask & cmd_byte) + 1;
-                              // - Followed by pair_count pairs.
-                              // - To specify more than 32 pairs, just create another Named command on the same
-                              //   level.
-                              //
-                              // for (int i = 0; i < pair_count; ++i) {
-                              //   if (extracted == std::get<0>(pair)) {
-                              //     auto const& Name = std::get<1>(pair);
-                              //     if (extracted) {
-                              //       // add to non-zero value queue.  Allows display grouping as "A | Name".
-                              //     } else {
-                              //       // add to zero value queue.  Allows display grouping as "A, Name"
-                              //     }
-                              //     break;
-                              //   }
-                              // }
-                                 
-  Numeric           = 1 << 5, // extracted = (group_bitmask & value);
-                              // format = Payload2Mask & cmd_byte;
-                              //   - Followed by a name to name the field.
-                              //   - Does NOT use active_bitmask as that would add additional overhead as mask would
-                              //     be used only once.
-                              //   - Format can contain up to 4 independent formatting rules.  Such rules could be:
-
-                              //     If there is a 0 in the group_bitmask's least significant bit, keep shifting
-                              //     value and mask right till it's a 1.
-  FmtRightShiftBits    = 1,
-                              //     Bits are packed densely into the low bits in least-significant-bit order.
-  FmtPackBits          = 2,
-                              //     After packing, the most significant extracted bit becomes the sign bit and is
-                              //     sign extended.
-  FmtIsSigned          = 4,
-  FmtUnused            = 8,
-                              //
-                              //   formatted_value = format_value(extracted, format);
-                              //   // add (name, value) pair to numeric queue.
-                              //   // Allows display grouping as "A, Name = Value"
-
-
-  // CONDITIONALS
-  //
-  // Can specify that a bit represents how other bits are interpreted.  If a particular bit sequence requires a
-  // different representation, nest the groups.  This is slightly clunky, but optimizes the stream size for the more
-  // common cases.
-
-  GroupIf           = 2 << 5, // select_group_bitmask = (group_selector_bitmask & value);
-                              // cmd_count = (PayloadMask & cmd_byte) + 1;
-                              // if ( select_group_bitmask) {
-                              //   // Execute the following cmd_count commands.
-                              // } else {
-                              //   // Advance past cmd_count commands without executing them.
-                              // }
-                                 
-  GroupIfNot        = 3 << 5, // select_group_bitmask = (group_selector_bitmask & value);
-                              // cmd_count = (PayloadMask & cmd_byte) + 1;
-                              // if (!select_group_bitmask) {
-                              //   // Execute the following cmd_count commands.
-                              // } else {
-                              //   // Advance past cmd_count commands without executing them.
-                              // }
-  
-  // COMBINED CONDITIONALS
-  //
-  // Though not explicitly required, the rest micro-optimize the resulting stream length.
-  
-  GroupIfNamed      = 4 << 5, // select_group_bitmask = (group_selector_bitmask & value);
-                              // pair_count = (PayloadMask & cmd_byte) + 1;
-                              // if ( select_group_bitmask) {
-                              //   extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
-                              //   // Compare extracted against pair_count pairs as specified for Named.
-                              // } else {
-                              //   // Advance past pair_count pairs without checking them.
-                              // }
-
-  GroupIfNotNamed   = 5 << 5, // select_group_bitmask = (group_selector_bitmask & value);
-                              // pair_count = (PayloadMask & cmd_byte) + 1;
-                              // if (!select_group_bitmask) {
-                              //   extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
-                              //   // Compare extracted against pair_count pairs as specified for Named.
-                              // } else {
-                              //   // Advance past pair_count pairs without checking them.
-                              // }
-  
-  SetMaskValue      = 6 << 5, // Sets active_bitmask.
-                              // - Followed by active_bitmask value.
-                              //
-                              // active_bitmask is initially 0.
-                              //
-                              // When entering a GroupIf/GroupIfNot body, active_bitmask is pushed onto a stack and
-                              // restored when leaving the scope.
-                              //
-                              // This changes opcode's parameters include a group_bitmask:
-                              //
-                              //  | opcode \ abm == 0 | true  | false |
-                              //  |-------------------|-------|-------|
-                              //  | Named             | true  | false |
-                              //  | Numeric           | true  | true  |
-                              //  | GroupIf           | true  | true  |
-                              //  | GroupIfNot        | true  | true  |
-                              //  | GroupIfNamed      | true  | false |
-                              //  | GroupIfNotNamed   | true  | false |
-                              //  | GroupIfNumeric    | true  | true  |
-                              //  | GroupIfNotNumeric | true  | true  |
-                              //
-                              // All except Named always have an independent parameter.
-                              //
-                              // Named only takes parameters if active_bitmask is not 0.
-
-  Use2ndOpcodes     = 7 << 5, // Use secondary opcodes
-
-  GroupIfNumeric    = 0 << 4, // select_group_bitmask = (group_selector_bitmask & value);
-                              // extracted = ((active_bitmask ? active_bitmask : group_bitmask) & value);
-                              // pair_count = (PayloadMask & cmd_byte) + 1;
-                              // if ( select_group_bitmask) {
-                              //   // Compare extracted against pair_count pairs as specified for Named.
-                              // } else {
-                              //   // Advance past pair_count pairs without checking them.
-                              // }
-
-  GroupIfNotNumeric = 1 << 4, // extracted = (group_bitmask & value);
-                              // select_group_bitmask = (group_selector_bitmask & value);
-                              // pair_count = (PayloadMask & cmd_byte) + 1;
-                              // if (!select_group_bitmask) {
-                              //   // Compare extracted against pair_count pairs as specified for Named.
-                              // } else {
-                              //   // Advance past pair_count pairs without checking them.
-                              // }
-};
-```
-
-The length of the enum stream must be specified to know when the last terminal
-has been reached.
-
-Named specifiers should come *before* Numeric, as once a Numeric is found for a
-bit set, Named items using those same bits would be ignored.
+This format makes scope explicit in each `GroupIf*` command. The block's
+`bitmask` replaces the earlier idea of a separate `SetMaskValue` command, so the
+scope used by a conditional block is visible at the block header instead of
+being ambient mutable state.
 
 ##### Enum Stream Specification
 
-An enum definition stream consists of one command following another.  Here are
-the types of the parameters.
+An enum definition stream consists of one command following another.
 
-| type                   | specified by       |
-|------------------------|--------------------|
-| command                | eEnumCommand       |
-| name                   | c-string           |
-| pair                   | (enum_value, name) |
-| group_bitmask          | number             |
-| group_selector_bitmask | number             |
+The basic data items are:
 
-A command consists of either:
+| item          | meaning                              |
+|---------------|--------------------------------------|
+| `bitmask`     | constrains comparisons or numeric output |
+| `enum_value`  | masked enum value to compare against |
+| `name`        | emitted name or numeric field label  |
+| `pair`        | (`enum_value`, `name`)               |
+| `group_bitmask` | single selector bit for a conditional group |
 
-1. `cmd_byte, group_bitmask, parameters`
-2. `cmd_byte, group_selector_bitmask, parameters`
-3. `cmd_byte, parameters`
+The commands are:
 
-Most commands specify how many commands or pairs follow the cmd_byte.
+| command | encoded parameters | external parameters | meaning |
+|---------|--------------------|---------------------|---------|
+| `Terminate` | `Unused` | none | Ends stream processing. Required when the stream length is not known externally. |
+| `Named` | `Pair_count` | `pair`, ... | Compares `(value & current_scope_bitmask)` against each `enum_value` and emits the matching `name`. |
+| `Numeric` | `Format` | `bitmask`, `name` | Emits a numeric representation of `value & bitmask` using the selected format. |
+| `GroupIf` | `If_cmd_count` | `group_bitmask`, `bitmask`, `command`, ... | If `(value & group_bitmask) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands. |
+| `GroupIfNamed` | `If_pair_count` | `group_bitmask`, `bitmask`, `pair`, ... | Conditional `Named` block in a nested scope. |
+| `GroupIfNumeric` | `Format` and optional `Negate` | `group_bitmask`, `bitmask`, `name` | Conditional `Numeric` block in a nested scope. `Negate` makes the numeric output belong to the `else` branch instead of the `if` branch. |
+| `Else` | `Else_pair_count` or `Else_cmd_count` | `pair`, ... or `command`, ... | Alternate branch for the immediately preceding `GroupIf` or `GroupIfNamed` block. The `Else` branch uses the same block scope `bitmask` as the corresponding `if` branch. |
+| `ContinueScope` | `Cont_pair_count` or `Cont_cmd_count` | `pair`, ... or `command`, ... | Extends the immediately preceding scope body when more pairs or commands are needed than fit in the originating count field. |
 
-The commands and their parameters are:
+The encoded parameters are:
 
-| command           | embedded parameter | external parameters                            |
-|-------------------|--------------------|------------------------------------------------|
-| Named             | Number of pairs    | *group_bitmask, pairs                          |
-| Numeric           | Format             |  group_bitmask, name                           |
-| GroupIf           | Number of commands |  group_selector_bitmask, command, ...          |
-| GroupIfNot        | Number of commands |  group_selector_bitmask, command, ...          |
-| GroupIfNamed      | Number of pairs    |  group_selector_bitmask, *group_bitmask, pairs |
-| GroupIfNotNamed   | Number of pairs    |  group_selector_bitmask, *group_bitmask, pairs |
-| GroupIfNumeric    | Format             |  group_selector_bitmask, group_bitmask, name   |
-| GroupIfNotNumeric | Format             |  group_selector_bitmask, group_bitmask, name   |
-| SetMaskValue      | Unused (0)         |  group_bitmask                                 |
+| parameter | meaning |
+|-----------|---------|
+| `Unused` | Reserved. Must be zero. |
+| `Pair_count` | Number of pairs following `Named` (1-32). |
+| `If_pair_count` | Number of pairs following `GroupIfNamed` (0-31). |
+| `Else_pair_count` | Number of pairs following `Else` for a named branch (1-32). |
+| `Cont_pair_count` | Number of pairs following `ContinueScope` for a named branch (1-32). |
+| `If_cmd_count` | Number of commands following `GroupIf` (0-31). |
+| `Else_cmd_count` | Number of commands following `Else` for a command branch (1-32). |
+| `Cont_cmd_count` | Number of commands following `ContinueScope` for a command branch (1-32). |
+| `Format` | Numeric formatting mode. |
+| `Negate` | Makes `GroupIfNumeric` refer to the `else` branch. |
 
-- It is invalid for a `group_bitmask` or a `group_selector_bitmask` to be 0.
-- `*group_bitmask` is only specified if the `active_bitmask` is 0.
-- Using `SetMaskValue` to set the `active_bitmask` can reduce the length of the
-  stream.  More savings is possible by using [`dints`](#dynamic-integers-dint) for
-  the `*_bitmask`s and the `enum_value`s.
-- The length of the stream should be known ahead of time to know when the
-  program ends.  If warranted, since `group_bitmask` must be a non-zero value to
-  be valid, it is possible to use `Numeric` with a zero `group_bitmask`, or any
-  of the `GroupIf*` commands with a zero `group_selector_bitmask` to indicate
-  the end of the stream.
+Execution rules:
+
+1. Processing begins with `current_scope_bitmask = ~0`.
+2. `Named` compares real masked enum values. Values are not shifted before comparing:
+   `(value & current_scope_bitmask) == enum_value`.
+3. `Numeric` formats `value & bitmask`. `Format` controls how the masked bits are interpreted.
+4. `group_bitmask` must contain exactly one bit. It selects which branch of a conditional group is used.
+5. Entering `GroupIf`, `GroupIfNamed`, or `GroupIfNumeric` evaluates whether
+   `(value & group_bitmask) != 0`.
+6. Each `GroupIf*` command introduces a new scope bitmask. On entry, the
+   current scope bitmask is pushed and replaced with the block's `bitmask`. On
+   exit, the previous scope bitmask is restored.
+7. The block `bitmask` of every `GroupIf*` command must be a subset of the
+   current scope bitmask:
+   `(bitmask & ~current_scope_bitmask) == 0`.
+   A stream that violates this rule is invalid.
+8. The matching `Else` branch reuses the same scope bitmask as the
+   corresponding conditional branch.
+9. `ContinueScope` continues the current branch at the same nesting level and
+   with the same scope bitmask. It does not introduce a new condition.
+10. `Else` and `ContinueScope` are only valid immediately after a compatible
+    branch of the same kind.
+
+Because nested scope bitmasks must always narrow their parent scope, malformed
+or corrupted streams are easier to detect than with a model that relies on a
+separate mutable mask-setting command. More compact streams are also possible
+because the scope bitmask is carried directly by the `GroupIf*` block that uses
+it.
 
 ### Packet Design
 
