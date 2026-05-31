@@ -16,6 +16,12 @@ enum class SparseEnumBits : std::uint8_t {
   Value = 0b10010u,
 };
 
+// Signed-underlying enum variant for sign-extension coverage.
+enum class SignedSparseEnumBits : std::int8_t {
+  Mask = 0b10110,
+  Value = 0b10010,
+};
+
 // Canonical sparse-mask example used throughout the file.
 constexpr std::uint8_t kSparseMask{ 0b10110u };
 constexpr std::uint8_t kSparseValue{ 0b10010u };
@@ -27,6 +33,19 @@ constexpr std::uint8_t kContiguousMask{ 0b01110u };
 constexpr std::uint8_t kContiguousValue{ 0b01010u };
 constexpr std::uint8_t kContiguousPackedLsb{ 0b00101u };
 constexpr std::uint8_t kContiguousPackedAligned{ 0b01010u };
+
+// Signed sparse-mask inputs exercise the key sign-extension case:
+// the extracted sign bit comes from mask bit 4, not from the storage MSB at bit 7.
+constexpr std::int8_t kSignedSparseMask{ 0b10110 };
+constexpr std::int8_t kSignedSparseValue{ 0b10010 };
+constexpr std::int8_t kSignedSparsePackedLsb{ -3 };
+constexpr std::int8_t kSignedSparsePackedAligned{ -6 };
+
+// Signed contiguous inputs keep the same three-bit payload without interior holes.
+constexpr std::int8_t kSignedContiguousMask{ 0b01110 };
+constexpr std::int8_t kSignedContiguousValue{ 0b01010 };
+constexpr std::int8_t kSignedContiguousPackedLsb{ -3 };
+constexpr std::int8_t kSignedContiguousPackedAligned{ -6 };
 
 // A bottom-bit-only mask exercises the no-offset path with the smallest field.
 // Both packed forms are identical because the selected bit already lives at bit 0.
@@ -118,10 +137,10 @@ constexpr bool kConstexprEnumSupportWorks{ []() constexpr {
 static_assert(kConstexprEnumSupportWorks);
 
 constexpr bool kConstexprIntegralReturnTypesMatchContract{ []() constexpr {
-  // Integral masks should condense to the unsigned working type.
+  // Integral masks should condense to the underlying-equivalent result type.
   bool const condense_type_ok{ std::is_same_v<
     decltype(Constexpr::condense(kSparseMask, kSparseValue, true)),
-    Constexpr::impl::unsigned_equivalent_t<std::uint8_t>
+    Constexpr::impl::underlying_equivalent_t<std::uint8_t>
   > };
 
   // Expanding should restore the original integral type.
@@ -135,10 +154,10 @@ constexpr bool kConstexprIntegralReturnTypesMatchContract{ []() constexpr {
 static_assert(kConstexprIntegralReturnTypesMatchContract);
 
 constexpr bool kConstexprEnumReturnTypesMatchContract{ []() constexpr {
-  // Enum masks should still condense through their unsigned storage type.
+  // Enum masks should condense through their underlying-equivalent result type.
   bool const condense_type_ok{ std::is_same_v<
     decltype(Constexpr::condense(SparseEnumBits::Mask, SparseEnumBits::Value, true)),
-    Constexpr::impl::unsigned_equivalent_t<SparseEnumBits>
+    Constexpr::impl::underlying_equivalent_t<SparseEnumBits>
   > };
 
   // Expanding should recover the enum type itself, not the storage type.
@@ -150,6 +169,53 @@ constexpr bool kConstexprEnumReturnTypesMatchContract{ []() constexpr {
   return condense_type_ok && expand_type_ok;
 }() };
 static_assert(kConstexprEnumReturnTypesMatchContract);
+
+constexpr bool kConstexprSignExtendedCondenseWorks{ []() constexpr {
+  // Sparse signed inputs should sign-extend from the mask's own top selected bit.
+  // Here that sign source is bit 4 of the original value, not bit 7 of std::int8_t.
+  bool const sparse_integral_ok{
+    Constexpr::condense(kSignedSparseMask, kSignedSparseValue, true, true)
+      == kSignedSparsePackedLsb
+    && Constexpr::condense(kSignedSparseMask, kSignedSparseValue, false, true)
+      == kSignedSparsePackedAligned
+  };
+
+  // Contiguous signed inputs should produce the same signed payload values.
+  bool const contiguous_integral_ok{
+    Constexpr::condense(kSignedContiguousMask, kSignedContiguousValue, true, true)
+      == kSignedContiguousPackedLsb
+    && Constexpr::condense(kSignedContiguousMask, kSignedContiguousValue, false, true)
+      == kSignedContiguousPackedAligned
+  };
+
+  // Signed-underlying enums should sign-extend through their underlying type.
+  bool const enum_ok{
+    Constexpr::condense(SignedSparseEnumBits::Mask, SignedSparseEnumBits::Value, true, true)
+      == kSignedSparsePackedLsb
+    && Constexpr::condense(SignedSparseEnumBits::Mask, SignedSparseEnumBits::Value, false, true)
+      == kSignedSparsePackedAligned
+  };
+
+  return sparse_integral_ok && contiguous_integral_ok && enum_ok;
+}() };
+static_assert(kConstexprSignExtendedCondenseWorks);
+
+constexpr bool kConstexprSignedReturnTypesMatchContract{ []() constexpr {
+  // Signed integrals should preserve their signed result type.
+  bool const signed_integral_type_ok{ std::is_same_v<
+    decltype(Constexpr::condense(kSignedSparseMask, kSignedSparseValue, true, true)),
+    std::int8_t
+  > };
+
+  // Signed-underlying enums should return that signed underlying type.
+  bool const signed_enum_type_ok{ std::is_same_v<
+    decltype(Constexpr::condense(SignedSparseEnumBits::Mask, SignedSparseEnumBits::Value, true, true)),
+    std::int8_t
+  > };
+
+  return signed_integral_type_ok && signed_enum_type_ok;
+}() };
+static_assert(kConstexprSignedReturnTypesMatchContract);
 
 constexpr bool kConstexprEdgeBitScenariosWork{ []() constexpr {
   // Bottom-bit-only masks should make the aligned and LSB-packed forms coincide.
@@ -310,6 +376,8 @@ TEST(MaskedBitsConstexpr, SupportsCompileTimeEvaluation)
   // Then confirm the API contracts for return types and edge-position behavior.
   EXPECT_TRUE(kConstexprIntegralReturnTypesMatchContract);
   EXPECT_TRUE(kConstexprEnumReturnTypesMatchContract);
+  EXPECT_TRUE(kConstexprSignExtendedCondenseWorks);
+  EXPECT_TRUE(kConstexprSignedReturnTypesMatchContract);
   EXPECT_TRUE(kConstexprEdgeBitScenariosWork);
   EXPECT_TRUE(kConstexprWiderIntegralWidthsWork);
 }
@@ -505,6 +573,44 @@ TEST(MaskedBitsRuntime, SupportsSmallWidthEnums)
   // Expand should return the enum type and preserve the original enumerator value.
   SparseEnumBits const expanded{ Constexpr::expand(SparseEnumBits::Mask, kSparsePackedLsb, true) };
   EXPECT_EQ(as_unsigned(SparseEnumBits::Value), as_unsigned(expanded));
+}
+
+// Sign extension should come from the mask's top selected bit, not the storage MSB.
+TEST(MaskedBitsRuntime, SignExtendsFromMaskedMsbRatherThanStorageMsb)
+{
+  // Bit 4 is the sign source here even though the storage sign bit for std::int8_t is bit 7.
+  EXPECT_EQ(
+    kSignedSparsePackedLsb,
+    Constexpr::condense(kSignedSparseMask, kSignedSparseValue, true, true)
+  );
+  EXPECT_EQ(
+    kSignedSparsePackedAligned,
+    Constexpr::condense(kSignedSparseMask, kSignedSparseValue, false, true)
+  );
+}
+
+// Signed extraction should sign-extend the packed field for integral and enum inputs.
+TEST(MaskedBitsRuntime, SignExtendsPackedFields)
+{
+  // Contiguous signed inputs should produce the same signed values.
+  EXPECT_EQ(
+    kSignedContiguousPackedLsb,
+    Constexpr::condense(kSignedContiguousMask, kSignedContiguousValue, true, true)
+  );
+  EXPECT_EQ(
+    kSignedContiguousPackedAligned,
+    Constexpr::condense(kSignedContiguousMask, kSignedContiguousValue, false, true)
+  );
+
+  // Signed-underlying enums should sign-extend through their underlying type.
+  EXPECT_EQ(
+    kSignedSparsePackedLsb,
+    Constexpr::condense(SignedSparseEnumBits::Mask, SignedSparseEnumBits::Value, true, true)
+  );
+  EXPECT_EQ(
+    kSignedSparsePackedAligned,
+    Constexpr::condense(SignedSparseEnumBits::Mask, SignedSparseEnumBits::Value, false, true)
+  );
 }
 
 // A zero mask is nonsensical for all three APIs and should fail consistently.

@@ -44,6 +44,30 @@ namespace Constexpr {
     template <typename T>
     using unsigned_equivalent_t = typename unsigned_equivalent<T>::type;
 
+    /**
+     * @brief Maps an enum or integral type to an integer type of the same width
+     *   and sign type.
+     *
+     * @tparam T - Enum or integral type to map.
+     */
+    template <typename T, bool IsEnum = std::is_enum<T>::value>
+    struct underlying_equivalent {
+        using type = T;
+    };
+
+    template <typename T>
+    struct underlying_equivalent<T, true> {
+        using type = std::underlying_type_t<T>;
+    };
+
+    /**
+     * @brief Convenience alias for \c underlying_equivalent<T>::type.
+     *
+     * @tparam T - Enum or integral type to map.
+     */
+    template <typename T>
+    using underlying_equivalent_t = typename underlying_equivalent<T>::type;
+
   } // namespace impl
 
 /**
@@ -83,11 +107,15 @@ constexpr std::size_t least_set_bit_index(E mask) {
  *   significant bits of the result. If \c false, leave the condensed field
  *   aligned so its least significant bit stays at the original least
  *   significant set bit of \p mask.
- * @return impl::unsigned_equivalent_t<E> - Unsigned packed result.
+ * @param sign_extend - Use the value at most significant set bit of the mask as
+ *   a sign bit, which is to be extended in the resulting value.  Result is
+ *   treated as a negative value if the underlying equivalent type is a signed
+ *   type.
+ * @return impl::underlying_equivalent_t<E> - Packed result.
  * @throws std::invalid_argument if \p mask == \c 0.
  */
 template <typename E>
-constexpr auto condense(E mask, E value, bool align_to_lsb) {
+constexpr auto condense(E mask, E value, bool align_to_lsb, bool sign_extend = false) {
   using T = impl::unsigned_equivalent_t<E>;
   T mask_{ static_cast<T>(mask) };
   std::size_t min_bit{ least_set_bit_index(mask) };
@@ -112,7 +140,18 @@ constexpr auto condense(E mask, E value, bool align_to_lsb) {
       ? 0       // adjust to lsb
       : min_bit // adjust back to mask original location
     ) };
-  return condensed_value >>= shift_back;
+
+  if (sign_extend) {
+    bool is_negative { (condensed_value & top_bit_mask) != 0 };
+    if (is_negative) {
+      T extend{ static_cast<T>(~(static_cast<T>(~0) >> shift_back)) };
+      condensed_value >>= shift_back;
+      return static_cast<impl::underlying_equivalent_t<E>>(
+        condensed_value | extend);
+    }
+  }
+  return static_cast<impl::underlying_equivalent_t<E>>(
+    condensed_value >> shift_back);
 }
 
 /**
