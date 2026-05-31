@@ -13,6 +13,7 @@
       - [Ensuring Generated FString CRCs Are Unique](#ensuring-generated-fstring-crcs-are-unique)
     - [Enum Definition Stream](#enum-definition-stream)
       - [Enum Stream Specification](#enum-stream-specification)
+    - [Possible Render Mechanism](#possible-render-mechanism)
   - [Packet Design](#packet-design)
     - [General Block Format](#general-block-format)
       - [Field 2: Sequence And Continuation Flags](#field-2-sequence-and-continuation-flags)
@@ -145,7 +146,7 @@ There are 3 different control sequences.
 
    This specifies the binary representation of the type being printed.  This is
    because the values are not translated to text, but are stored as the machine
-   loggers binary format to be converted later to reduce logging latency.
+   logger's binary format to be converted later to reduce logging latency.
 
    1. Numbers and strings
 
@@ -155,7 +156,7 @@ There are 3 different control sequences.
 
       Enums are followed by a dint (dynamic integer) to specify which registered
       enum to use.  A dint is a 7 bit number with a continuation bit to allow a
-      number to be as small as 1 byte for small numbers but can be theoretically
+      number to be as small as 1 byte for small numbers but can theoretically
       represent any sized number.
 
    3. Array
@@ -215,7 +216,7 @@ There are 3 different control sequences.
       ZERO.
 
       This adds one or more bytes to the string. A DINT_SALT value of 0 is an
-      error, but it's equivalent is to have no DINT_SALT at all.  A dint is used
+      error, but its equivalent is to have no DINT_SALT at all.  A dint is used
       to ensure that the salt is always part of the fstring and doesn't
       prematurely terminate it with an inadvertent NUL. The salt shouldn't be
       printed on the displaying end.
@@ -311,7 +312,8 @@ void verify_log_crc_uniqueness() {
 }
 ```
 
-Voila!  Should now give a compile time error showing where the CRC are the same.
+Voila!  Should now give a compile-time error showing where the CRCs are the
+same.
 
 > **NOTE:**
 >
@@ -338,7 +340,7 @@ enum eEnumStorageType : std::uint8_t {
    Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
   UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
 
-  // states how constrained group_bitmask, bitmask and enum_value values are stored
+  // States how constrained group_bitmask, bitmask and enum_value values are stored
   Compress          = 0x08, // Encode constrained values as condensed dints under the parent scope
 };
 ```
@@ -372,12 +374,12 @@ enum eEnumCommand : std::uint8_t {
   Terminate          = 0 << 5,  // End of stream if stream length not known.
 
   Named              = 1 << 5,  // Specifies pairs; compares (value & current or stated bitmask) to enum_value.
-   HasBitmask        = 1 << 4,  //   States if bitmask is specified.
+   HasBitmask        =  1 << 4, //   States if bitmask is specified.
   
   Numeric            = 2 << 5,  // Specifies name for bits for stated bitmask.
-   FmtRightShiftBits = 1 << 0,  //   Shift bits so least significant bits coinciding with bitmask are at the 0th bit.
-   FmtPackBits       = 1 << 1,  //   Condense bits coinciding with bitmask.
-   FmtIsSigned       = 1 << 2,  //   Sign extend bit coinciding with most significant bit of bitmask.
+   FmtRightShiftBits =  1 << 0, //   Shift bits so least significant bits coinciding with bitmask are at the 0th bit.
+   FmtPackBits       =  1 << 1, //   Condense bits coinciding with bitmask.
+   FmtIsSigned       =  1 << 2, //   Sign extend bit coinciding with most significant bit of bitmask.
 
   GroupIf            = 3 << 5,  // If group_bitmask set, use bitmask on following commands.
   GroupIfNamed       = 4 << 5,  // If group_bitmask set, use bitmask on following pairs.
@@ -385,7 +387,8 @@ enum eEnumCommand : std::uint8_t {
   Else               = 6 << 5,  // Continue GroupIf/GroupIfNamed scope as else group.
 
   GroupIfNumeric     = 7 << 5,  // If group_bitmask set, specify name for bits for stated bitmask.
-   Negate            = 1 << 3,  //   Negates GroupIfNumeric, so that it acts as an Else.
+   Negate            =  1 << 3, //   Negates GroupIfNumeric, so that it acts as an Else.
+   ElseCmd           =  1 << 4, //   If ends in Else, is a command list, else a pair list.
    // Can also take Fmt* flags.
 };
 ```
@@ -406,35 +409,35 @@ The basic data items are:
 
 The commands are:
 
-| command | encoded parameters | external parameters | meaning |
-|---------|--------------------|---------------------|---------|
-| `Terminate` | `Unused` | none | Ends stream processing. Required when the stream length is not known externally. |
-| `Named` | `Pair_count` and optional `Has_bitmask` | `pair`, ... or `bitmask`, `pair`, ... | Uses the effective bitmask for that command, compares the current value against each `enum_value`, and emits the matching `name`. |
-| `Numeric` | `Format` | `bitmask`, `name` | Emits a numeric representation of `value & bitmask` using the selected format. |
-| `GroupIf` | `If_cmd_count` | `group_bitmask`, `bitmask`, `command`, ... | If `(value & group_bitmask) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands. |
-| `GroupIfNamed` | `If_pair_count` | `group_bitmask`, `bitmask`, `pair`, ... | Conditional `Named` block in a nested scope. |
-| `GroupIfNumeric` | `Format` and optional `Negate` | `group_bitmask`, `bitmask`, `name` | Conditional `Numeric` block in a nested scope. `Negate` makes the numeric output belong to the `else` branch instead of the `if` branch, so `GroupIfNumeric` does not use a separate `Else`. |
-| `Else` | `Else_pair_count` or `Else_cmd_count` | `pair`, ... or `command`, ... | Alternate branch for the immediately preceding `GroupIf` or `GroupIfNamed` block. The `Else` branch uses the same block scope `bitmask` as the corresponding `if` branch. |
-| `ContinueScope` | `Cont_pair_count` or `Cont_cmd_count` | `pair`, ... or `command`, ... | Extends the immediately preceding branch when more pairs or commands are needed than fit in the originating count field. |
+| command          | encoded parameters                      | external parameters                        | meaning                                                                                                                                                                                      |
+|------------------|-----------------------------------------|--------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Terminate`      | `Unused`                                | none                                       | Ends stream processing. Required when the stream length is not known externally.                                                                                                             |
+| `Named`          | `Pair_count` and optional `Has_bitmask` | `pair`, ... or `bitmask`, `pair`, ...      | Uses the effective bitmask for that command, compares the current value against each `enum_value`, and emits the matching `name`.                                                            |
+| `Numeric`        | `Format`                                | `bitmask`, `name`                          | Emits a numeric representation of `value & bitmask` using the selected format.                                                                                                               |
+| `GroupIf`        | `If_cmd_count`                          | `group_bitmask`, `bitmask`, `command`, ... | If `(value & group_bitmask) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands.                                                                        |
+| `GroupIfNamed`   | `If_pair_count`                         | `group_bitmask`, `bitmask`, `pair`, ...    | Conditional `Named` block in a nested scope.                                                                                                                                                 |
+| `GroupIfNumeric` | `Format` and optional `Negate`          | `group_bitmask`, `bitmask`, `name`         | Conditional `Numeric` block in a nested scope. `Negate` makes the numeric output belong to the `else` branch instead of the `if` branch, so `GroupIfNumeric` does not use a separate `Else`. |
+| `Else`           | `Else_pair_count` or `Else_cmd_count`   | `pair`, ... or `command`, ...              | Alternate branch for the immediately preceding `GroupIf` or `GroupIfNamed` block. The `Else` branch uses the same block scope `bitmask` as the corresponding `if` branch.                    |
+| `ContinueScope`  | `Cont_pair_count` or `Cont_cmd_count`   | `pair`, ... or `command`, ...              | Extends the immediately preceding branch when more pairs or commands are needed than fit in the originating count field.                                                                     |
 
 The encoded parameters are:
 
-| parameter | meaning |
-|-----------|---------|
-| `Unused` | Reserved. Must be zero. |
-| `Has_bitmask` | Makes `Named` take a `bitmask` for that command. |
-| `Pair_count` | Number of pairs following `Named` (1-16). |
-| `If_pair_count` | Number of pairs following `GroupIfNamed` (0-31). |
-| `Else_pair_count` | Number of pairs following `Else` for a named branch (1-32). |
-| `Cont_pair_count` | Number of pairs following `ContinueScope` for a named branch (1-32). |
-| `If_cmd_count` | Number of commands following `GroupIf` (0-31). |
-| `Else_cmd_count` | Number of commands following `Else` for a command branch (1-32). |
-| `Cont_cmd_count` | Number of commands following `ContinueScope` for a command branch (1-32). |
-| `Format` | Numeric formatting mode. A bitwise OR of the `Fmt*` flags below. |
+| parameter           | meaning                                                                                                                                 |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `Unused`            | Reserved. Must be zero.                                                                                                                 |
+| `Has_bitmask`       | Makes `Named` take a `bitmask` for that command.                                                                                        |
+| `Pair_count`        | Number of pairs following `Named` (1-16).                                                                                               |
+| `If_pair_count`     | Number of pairs following `GroupIfNamed` (0-31).                                                                                        |
+| `Else_pair_count`   | Number of pairs following `Else` for a named branch (1-32).                                                                             |
+| `Cont_pair_count`   | Number of pairs following `ContinueScope` for a named branch (1-32).                                                                    |
+| `If_cmd_count`      | Number of commands following `GroupIf` (0-31).                                                                                          |
+| `Else_cmd_count`    | Number of commands following `Else` for a command branch (1-32).                                                                        |
+| `Cont_cmd_count`    | Number of commands following `ContinueScope` for a command branch (1-32).                                                               |
+| `Format`            | Numeric formatting mode. A bitwise OR of the `Fmt*` flags below.                                                                        |
 | `FmtRightShiftBits` | If the least significant bit selected by `bitmask` is not bit 0, shift the masked value right until the selected range starts at bit 0. |
-| `FmtPackBits` | Pack the selected bits densely into the low bits in least-significant-bit order. |
-| `FmtIsSigned` | After shifting or packing, treat the most significant extracted bit as the sign bit and sign-extend it. |
-| `Negate` | Makes `GroupIfNumeric` refer to the `else` branch. |
+| `FmtPackBits`       | Pack the selected bits densely into the low bits in least-significant-bit order.                                                        |
+| `FmtIsSigned`       | After shifting or packing, treat the most significant extracted bit as the sign bit and sign-extend it.                                 |
+| `Negate`            | Makes `GroupIfNumeric` refer to the `else` branch.                                                                                      |
 
 > 💡NOTE:
 >
@@ -480,12 +483,68 @@ Execution rules:
     `Named`, `GroupIf`, `GroupIfNamed`, `Else` or another `ContinueScope`.  A
     named branch may be extended only by more `pair`s, and a command branch may
     be extended only by more `command`s.
+14. Each command that specifies a `bitmask` pushes the `current_scope_bitmask`
+    for retrieval after the command ends.
 
 Because nested scope bitmasks must always narrow their parent scope, malformed
 or corrupted streams are easier to detect than with a model that relies on a
 separate mutable mask-setting command. More compact streams are also possible
 because the scope bitmask is carried directly by the `GroupIf*` block that uses
 it.
+
+#### Possible Render Mechanism
+
+Here is some pseudo-C++ for one possible rendering policy:
+
+```cpp
+render(value, stream):
+  current_scope_bitmask = ~0
+
+  for each command in stream:
+    if (command == Terminate)
+      break;
+
+    switch (command):
+      case Named:
+        effective_bitmask = HasBitmask ? bitmask : current_scope_bitmask
+        if any pair matches (value & effective_bitmask) == enum_value:
+          if enum_value == 0:
+            add_to_zero_queue(name)
+          else:
+            add_to_nonzero_queue(name)
+        break
+
+      case Numeric:
+        add_to_num_queue(name, format(value & bitmask, Format))
+        break
+
+      case GroupIf:
+      case GroupIfNamed:
+        if (value & group_bitmask) != 0:
+          push current_scope_bitmask
+          current_scope_bitmask = bitmask
+          evaluate if_branch
+          pop current_scope_bitmask
+        else if next command is Else:
+          push current_scope_bitmask
+          current_scope_bitmask = bitmask
+          evaluate else_branch
+          pop current_scope_bitmask
+        break
+
+      case GroupIfNumeric:
+        if (((value & group_bitmask) != 0) != (Negate != 0)):
+          push current_scope_bitmask
+          current_scope_bitmask = bitmask
+          add_to_num_queue(name, format(value & bitmask, Format))
+          pop current_scope_bitmask
+        break
+
+  // non-zero values are separated with '|' (they have bits set); zero values are not (they don't).
+  emit_nonzero() // separates items with '|'
+  emit_zero()    // separates items with ',' or ' '
+  emit_num()     // separates items with ',' or ' '
+```
 
 ### Packet Design
 
@@ -563,9 +622,9 @@ Contains 1 or more strings, with IDs and CRC16 for each.
 |   ✅    | 4     | variable | NUL terminated format string (c-string)     |
 |   ✅    | 5     | 2        | The CRC for the severity and string (CRC16) |
 
-Format string contains embedded info that represents the type and how it's to be
-displayed.  Any character with a value less than 32 indicates the start of a
-field.
+The format string contains embedded info that represents the type and how it's
+to be displayed.  Any character with a value less than 32 indicates the start of
+a field.
 
 See eType for more information.
 
@@ -605,17 +664,17 @@ used with the payload.
 |------:|---------:|--------------------------------------------|
 | 1     | 8        | Timestamp (machine timestamp)              |
 
-This is outputted periodically to keep the DataBlock's timestamp relevant.
-Maybe every 10 minutes?
+This is output periodically to keep the DataBlock's timestamp relevant. Maybe
+every 10 minutes?
 
 ##### 5. Drop Count Block Payload
 
 If the log buffers can't be emptied fast enough, some events will have to be
 dropped.  First, repeated StringBlock and EnumBlock packets will be postponed.
-Then Info packets will be the first to be dropped, then Debug, Warnings and
+Then Info packets will be the first to be dropped, then Debug, Warning and
 finally Error.
 
-This packet will be periodically be output if there are any dropped packets.
+This packet will periodically be output if there are any dropped packets.
 
 | field | bytes    | description                                |
 |------:|---------:|--------------------------------------------|
@@ -629,8 +688,8 @@ This packet will be periodically be output if there are any dropped packets.
 This specifies the basic information needed to identify the binary
 representation used by the logging machine.
 
-All integers are 2s complement and must be 1, 2, 4 or 8 bytes long.  Enums must
-be based on those representation.  Attempting to log anything else will result
+All integers are 2's complement and must be 1, 2, 4 or 8 bytes long.  Enums must
+be based on those representations.  Attempting to log anything else will result
 in a compile time error.
 
 By definition of this library, `CHAR_BIT` must equal 8, making chars equal to
