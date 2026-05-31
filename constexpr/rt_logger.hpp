@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <type_traits>
 #include <limits>
 #include <stdexcept>
@@ -92,28 +93,30 @@ class Block {
    * Set block type
    */
   void block_type(BlockType_e blockType) {
-    encode_value(bytes, I_BLOCK_TYPE, blockType);
+    encode_value(bytes + I_BLOCK_TYPE, std::end(bytes), blockType);
   }
 
   /**
    * Get block type
    */
   BlockType_e block_type() const {
-    return decode_value<Throw, BlockType_e>(bytes, I_BLOCK_TYPE);
+    std::byte const* src{ bytes + I_BLOCK_TYPE };
+    return decode_value<Throw, BlockType_e>(src, std::end(bytes));
   }
 
   /**
    * Set sequence number
    */
   void seq_num(uint8_t seqNum) {
-    encode_value(bytes, I_SEQ_NUM, seqNum);
+    encode_value(bytes + I_SEQ_NUM, std::end(bytes), seqNum);
   }
 
   /**
    * Get sequence number
    */
   uint8_t seq_num() const {
-    return decode_value<Throw, uint8_t>(bytes, I_SEQ_NUM);
+    std::byte const* src{ bytes + I_SEQ_NUM };
+    return decode_value<Throw, uint8_t>(src, std::end(bytes));
   }
 
   /**
@@ -121,28 +124,30 @@ class Block {
    */
   void payload_len(int payloadLen) {
     assert(0 < payloadLen && payloadLen < MAX_PAYLOAD);
-    encode_value(bytes, I_PAYLOAD_LEN, uint8_t(payloadLen-1));
+    encode_value(bytes + I_PAYLOAD_LEN, std::end(bytes), uint8_t(payloadLen-1));
   }
 
   /**
    * Get payload length
    */
   unsigned int payload_len() const {
-    return decode_value<Throw, uint8_t>(bytes, I_PAYLOAD_LEN)+1;
+    std::byte const* src{ bytes + I_PAYLOAD_LEN };
+    return decode_value<Throw, uint8_t>(src, std::end(bytes)) + 1;
   }
 
   /**
    * Set CRC
    */
   void crc(uint16_t crcValue) {
-    encode_value(bytes, I_CRC, crcValue);
+    encode_value(bytes + I_CRC, std::end(bytes), crcValue);
   }
 
   /**
    * Get CRC
    */
   uint16_t crc() const {
-    return decode_value<Throw, uint16_t>(bytes, I_CRC);
+    std::byte const* src{ bytes + I_CRC };
+    return decode_value<Throw, uint16_t>(src, std::end(bytes));
   }
 
   /**
@@ -168,7 +173,7 @@ class Block {
    */
   template<typename T>
   int payload_set(int offset, T const& value) {
-    encode_value(bytes, offset, value);
+    encode_value(bytes + offset, std::end(bytes), value);
     return HEADER_SIZE + offset + sizeof(T);
   }
 

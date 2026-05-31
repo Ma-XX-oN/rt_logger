@@ -90,242 +90,136 @@ void expect_values_equal(T const (&expected)[N], T const (&actual)[N])
 }
 
 // Runtime coverage
-TEST(MachineNumSpaceAvailable, ReportsRemainingCapacityInElements)
+TEST(MachineNumEncode, SupportsSingleValueEncoding)
 {
-  // Offsets inside partially used buffers should report remaining whole elements.
-  EXPECT_EQ(4u, space_available<std::uint16_t>(10, 1));
-  EXPECT_EQ(4u, space_available<std::uint16_t>(10, 2));
-  EXPECT_EQ(3u, space_available<std::uint16_t>(10, 3));
-
-  // Once fewer than sizeof(T) bytes remain, no additional elements fit.
-  EXPECT_EQ(0u, space_available<std::uint32_t>( 4, 3));
-  EXPECT_EQ(0u, space_available<std::uint32_t>( 4, 4));
-  EXPECT_EQ(0u, space_available<std::uint16_t>( 4, 5));
-}
-
-TEST(MachineNumEncode, SupportsSingleValueOverloads)
-{
-  // Use one known value so every overload can be compared to the same bytes.
+  // Use one known value so the returned pointer and written bytes can be verified.
   constexpr std::uint32_t value{ 0x12345678u };
   auto const expected{ object_bytes(value) };
 
   {
-    // Bounded-buffer overload that mutates an offset reference.
+    // Encode at offset 1 and verify the returned pointer advanced by sizeof(T).
     std::byte buffer[16]{};
-    std::size_t offset{ 1 };
-    std::size_t const end{ encode_value(buffer, std::size(buffer), offset, value) };
-    ASSERT_EQ(1u + sizeof(value), end);
-    EXPECT_EQ(end, offset);
+    std::byte* const end{ encode_value(buffer + 1, std::end(buffer), value) };
+    ASSERT_EQ(buffer + 1 + sizeof(value), end);
     expect_buffer_bytes(buffer, 1, expected);
   }
 
   {
-    // Bounded-buffer overload that takes the offset by value.
+    // Encode at offset 3 to prove arbitrary starting positions work.
     std::byte buffer[16]{};
-    std::size_t const end{ encode_value(buffer, std::size(buffer), std::size_t{2}, value) };
-    ASSERT_EQ(2u + sizeof(value), end);
-    expect_buffer_bytes(buffer, 2, expected);
-  }
-
-  {
-    // Raw-array overload that mutates an offset reference.
-    std::byte buffer[16]{};
-    std::size_t offset{ 3 };
-    std::size_t const end{ encode_value(buffer, offset, value) };
-    ASSERT_EQ(3u + sizeof(value), end);
-    EXPECT_EQ(end, offset);
+    std::byte* const end{ encode_value(buffer + 3, std::end(buffer), value) };
+    ASSERT_EQ(buffer + 3 + sizeof(value), end);
     expect_buffer_bytes(buffer, 3, expected);
   }
-
-  {
-    // Raw-array overload that takes the offset by value.
-    std::byte buffer[16]{};
-    std::size_t const end{ encode_value(buffer, 4, value) };
-    ASSERT_EQ(4u + sizeof(value), end);
-    expect_buffer_bytes(buffer, 4, expected);
-  }
 }
 
-TEST(MachineNumEncode, SupportsValueArrayOverloads)
+TEST(MachineNumEncode, SupportsValueArrayEncoding)
 {
-  // The array overloads should emit the two raw object payloads back-to-back.
-  std::uint16_t const values[]{0x1122u, 0x3344u};
+  // The array overload should emit the two raw object payloads back-to-back.
+  std::uint16_t const values[]{ 0x1122u, 0x3344u };
   auto const expected{ object_bytes(values) };
 
-  {
-    // Bounded-buffer array overload with a mutable offset reference.
-    std::byte buffer[16]{};
-    std::size_t offset{ 1 };
-    std::size_t const end{ encode_value(buffer, std::size(buffer), offset, values, std::size(values)) };
-    ASSERT_EQ(1u + sizeof(values), end);
-    EXPECT_EQ(end, offset);
-    expect_buffer_bytes(buffer, 1, expected);
-  }
-
-  {
-    // Bounded-buffer array overload with an offset passed by value.
-    std::byte buffer[16]{};
-    std::size_t const end{ encode_value(buffer, std::size(buffer), std::size_t{2}, values, std::size(values)) };
-    ASSERT_EQ(2u + sizeof(values), end);
-    expect_buffer_bytes(buffer, 2, expected);
-  }
+  std::byte buffer[16]{};
+  std::byte* const end{ encode_value(buffer + 1, std::end(buffer), values, std::size(values)) };
+  ASSERT_EQ(buffer + 1 + sizeof(values), end);
+  expect_buffer_bytes(buffer, 1, expected);
 }
 
-TEST(MachineNumDecode, SupportsSingleValueOverloads)
+TEST(MachineNumDecode, SupportsSingleValueDecoding)
 {
   // Seed the buffer with one machine-endian payload at an offset of one byte.
   constexpr std::int32_t value{ -123456789 };
   auto const encoded{ object_bytes(value) };
   std::byte buffer[16]{};
-
-  // Materialize the encoded bytes at the chosen offset once for all overloads.
   std::memcpy(buffer + 1, encoded.data(), encoded.size());
 
   {
-    // Bounded-buffer overload that mutates an offset reference.
-    std::size_t offset{ 1 };
+    // By-reference overload: iterator advances, decoded value matches.
+    std::byte const* src{ buffer + 1 };
     std::int32_t decoded{};
-    std::int32_t& result{ decode_value<Throw>(buffer, std::size(buffer), offset, decoded) };
+    std::int32_t& result{ decode_value<Throw>(src, std::end(buffer), decoded) };
     EXPECT_EQ(&decoded, &result);
-    EXPECT_EQ(1u + sizeof(value), offset);
+    EXPECT_EQ(buffer + 1 + sizeof(value), src);
     EXPECT_EQ(value, decoded);
   }
 
   {
-    // Bounded-buffer overload that takes the offset by value.
-    std::int32_t decoded{};
-    std::int32_t& result{ decode_value<Throw>(buffer, std::size(buffer), std::size_t{1}, decoded) };
-    EXPECT_EQ(&decoded, &result);
-    EXPECT_EQ(value, decoded);
-  }
-
-  {
-    // Raw-array overload that mutates an offset reference.
-    std::size_t offset{ 1 };
-    std::int32_t decoded{};
-    std::int32_t& result{ decode_value<Throw>(buffer, offset, decoded) };
-    EXPECT_EQ(&decoded, &result);
-    EXPECT_EQ(1u + sizeof(value), offset);
-    EXPECT_EQ(value, decoded);
-  }
-
-  {
-    // Raw-array overload that takes the offset by value.
-    std::int32_t decoded{};
-    std::int32_t& result{ decode_value<Throw>(buffer, std::size_t{1}, decoded) };
-    EXPECT_EQ(&decoded, &result);
-    EXPECT_EQ(value, decoded);
+    // By-value overload: iterator advances, returned value matches.
+    std::byte const* src{ buffer + 1 };
+    std::int32_t const result{ decode_value<Throw, std::int32_t>(src, std::end(buffer)) };
+    EXPECT_EQ(buffer + 1 + sizeof(value), src);
+    EXPECT_EQ(value, result);
   }
 }
 
-TEST(MachineNumDecode, SupportsValueArrayOverloads)
+TEST(MachineNumDecode, SupportsValueArrayDecoding)
 {
   // Seed the buffer with two adjacent values and decode them as an array.
-  std::uint16_t const expected_values[]{0x1122u, 0x3344u};
+  std::uint16_t const expected_values[]{ 0x1122u, 0x3344u };
   auto const encoded{ object_bytes(expected_values) };
   std::byte buffer[16]{};
-
-  // Materialize the array payload once and reuse it across overload variants.
   std::memcpy(buffer + 2, encoded.data(), encoded.size());
 
-  {
-    // Bounded-buffer array overload with a mutable offset reference.
-    std::size_t offset{ 2 };
-    std::uint16_t decoded_values[std::size(expected_values)]{};
-    std::uint16_t& result{ decode_value<Throw>(
-      buffer,
-      std::size(buffer),
-      offset,
-      decoded_values,
-      std::size(decoded_values)) };
-    EXPECT_EQ(&decoded_values[0], &result);
-    EXPECT_EQ(2u + sizeof(expected_values), offset);
-    expect_values_equal(expected_values, decoded_values);
-  }
-
-  {
-    // Bounded-buffer array overload with an offset passed by value.
-    std::uint16_t decoded_values[std::size(expected_values)]{};
-    std::uint16_t& result{ decode_value<Throw>(
-      buffer,
-      std::size(buffer),
-      std::size_t{2},
-      decoded_values,
-      std::size(decoded_values)) };
-    EXPECT_EQ(&decoded_values[0], &result);
-    expect_values_equal(expected_values, decoded_values);
-  }
+  std::byte const* src{ buffer + 2 };
+  std::uint16_t decoded_values[std::size(expected_values)]{};
+  std::uint16_t& result{ decode_value<Throw>(
+    src,
+    std::end(buffer),
+    decoded_values,
+    std::size(decoded_values)) };
+  EXPECT_EQ(&decoded_values[0], &result);
+  EXPECT_EQ(buffer + 2 + sizeof(expected_values), src);
+  expect_values_equal(expected_values, decoded_values);
 }
 
-TEST(MachineNumDecode, SupportsEnumAndValueReturningOverloads)
+TEST(MachineNumDecode, SupportsEnumDecoding)
 {
-  // First prove enum decoding still uses the same raw-byte contract.
+  // Prove enum decoding uses the same raw-byte contract as arithmetic types.
   constexpr SampleEnum enum_value{ SampleEnum::Beta };
   auto const enum_bytes{ object_bytes(enum_value) };
-  std::byte enum_buffer[sizeof(SampleEnum)]{};
+  std::byte buffer[sizeof(SampleEnum)]{};
+  std::memcpy(buffer, enum_bytes.data(), enum_bytes.size());
 
-  // Copy the enum payload verbatim so decode_value reads the exact storage bytes.
-  std::memcpy(enum_buffer, enum_bytes.data(), enum_bytes.size());
+  {
+    // By-reference overload.
+    std::byte const* src{ buffer };
+    SampleEnum decoded{ SampleEnum::Alpha };
+    SampleEnum& result{ decode_value<Throw>(src, std::end(buffer), decoded) };
+    EXPECT_EQ(&decoded, &result);
+    EXPECT_EQ(enum_value, decoded);
+    EXPECT_EQ(buffer + sizeof(SampleEnum), src);
+  }
 
-  std::size_t enum_offset{ 0 };
-  SampleEnum decoded_enum{ SampleEnum::Alpha };
-  SampleEnum& enum_result{ decode_value<Throw>(enum_buffer, enum_offset, decoded_enum) };
-  EXPECT_EQ(&decoded_enum, &enum_result);
-  EXPECT_EQ(enum_value, decoded_enum);
-  EXPECT_EQ(sizeof(SampleEnum), enum_offset);
-
-  // Then exercise the overloads that return a decoded value by value.
-  constexpr std::uint64_t value{ 0x0123456789abcdefULL };
-  auto const value_bytes{ object_bytes(value) };
-  std::byte value_buffer[sizeof(value)]{};
-
-  // Reuse the same encoded payload for both value-returning overload forms.
-  std::memcpy(value_buffer, value_bytes.data(), value_bytes.size());
-
-  // The lvalue-offset overload should advance the caller's offset.
-  std::size_t offset{ 0 };
-  std::uint64_t const lvalue_result{ decode_value<Throw, std::uint64_t>(value_buffer, offset) };
-  EXPECT_EQ(value, lvalue_result);
-  EXPECT_EQ(sizeof(value), offset);
-
-  // The rvalue-offset overload should decode the same payload without state.
-  std::uint64_t const rvalue_result{ decode_value<Throw, std::uint64_t>(value_buffer, std::size_t{0}) };
-  EXPECT_EQ(value, rvalue_result);
-}
-
-TEST(MachineNumFailure, EncodeFailsWhenValueDoesNotFitRemainingBuffer)
-{
-  // Encoding should fail cleanly when fewer than sizeof(T) bytes remain.
-  std::byte buffer[4]{};
-  std::size_t offset{ 3 };
-  std::uint16_t const value{ 0x1122u };
-  EXPECT_EQ(0u, encode_value(buffer, std::size(buffer), offset, value));
-  EXPECT_EQ(3u, offset);
+  {
+    // By-value overload.
+    std::byte const* src{ buffer };
+    SampleEnum const result{ decode_value<Throw, SampleEnum>(src, std::end(buffer)) };
+    EXPECT_EQ(enum_value, result);
+    EXPECT_EQ(buffer + sizeof(SampleEnum), src);
+  }
 }
 
 TEST(MachineNumFailure, DecodeThrowsWhenValueDoesNotFitRemainingBuffer)
 {
   // Throwing decode should reject a truncated raw object representation.
   std::byte const buffer[3]{};
-
-  std::size_t offset{ 0 };
+  std::byte const* src{ buffer };
   std::uint32_t value{};
   EXPECT_THROW(
-    decode_value<Throw>(buffer, offset, value),
+    decode_value<Throw>(src, std::end(buffer), value),
     std::overflow_error
   );
 }
 
-TEST(MachineNumNoThrow, DecodeResetsOffsetAndPreservesDestinationWhenValueDoesNotFitRemainingBuffer)
+TEST(MachineNumNoThrow, DecodeResetsIteratorAndPreservesDestinationWhenValueDoesNotFitRemainingBuffer)
 {
-  // The no-throw variant should preserve caller state on truncated input.
+  // The no-throw variant should restore the iterator and leave v_dst untouched.
   std::byte const buffer[3]{};
-
-  std::size_t offset{ 0 };
+  std::byte const* src{ buffer };
   std::uint32_t value{ 0xdeadbeefu };
-  std::uint32_t& result{ decode_value<NoThrow>(buffer, offset, value) };
+  std::uint32_t& result{ decode_value<NoThrow>(src, std::end(buffer), value) };
   EXPECT_EQ(&value, &result);
-  EXPECT_EQ(0u, offset);
+  EXPECT_EQ(buffer, src);
   EXPECT_EQ(0xdeadbeefu, value);
 }
 
