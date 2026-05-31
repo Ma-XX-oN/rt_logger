@@ -10,7 +10,9 @@
 
 namespace {
 
+// Compile-time coverage
 constexpr bool kConstexprEncodePointerOverloadWorks{ []() constexpr {
+  // Encode a known signed payload through the pointer overload.
   std::byte buffer[2]{};
   std::byte* const end_it{ encode_dint(buffer, buffer + 2, int16_t(-600)) };
   return end_it == buffer + 2
@@ -19,11 +21,16 @@ constexpr bool kConstexprEncodePointerOverloadWorks{ []() constexpr {
 }() };
 static_assert(kConstexprEncodePointerOverloadWorks);
 
-constexpr auto kConstexprEncodedTemplate{ encode_dint<int16_t, int16_t(-600)>() };
-static_assert(kConstexprEncodedTemplate.size() == 2u);
-static_assert(kConstexprEncodedTemplate[0] == std::byte{0xd7});
-static_assert(kConstexprEncodedTemplate[1] == std::byte{0x44});
+constexpr bool kConstexprEncodedTemplateWorks{ []() constexpr {
+  // The value-template overload should produce the same two-byte payload.
+  constexpr auto encoded{ encode_dint<int16_t, int16_t(-600)>() };
+  return encoded.size() == 2u
+    && encoded[0] == std::byte{0xd7}
+    && encoded[1] == std::byte{0x44};
+}() };
+static_assert(kConstexprEncodedTemplateWorks);
 
+// Runtime helper assertions
 /**
  * @brief Verify that a value encodes to the expected byte sequence and
  *   decodes back to the original value.
@@ -37,16 +44,19 @@ void expect_encoding(T value, std::initializer_list<std::byte> expected)
 {
   std::byte buffer[16]{};
 
+  // Encode once and confirm the byte count matches the golden payload.
   std::byte* const end_it{ encode_dint(buffer, buffer + 16, value) };
   std::size_t const encoded_size{ static_cast<std::size_t>(end_it - buffer) };
   ASSERT_EQ(expected.size(), encoded_size);
 
+  // Then compare each emitted byte for readable failure output.
   std::size_t i{ 0 };
   for (std::byte expected_byte : expected) {
     EXPECT_EQ(expected_byte, buffer[i]) << "byte index " << i;
     ++i;
   }
 
+  // Finally decode the buffer and prove the iterator is fully consumed.
   std::byte const* read_it{ buffer };
   T decoded{};
   decode_dint<Throw>(read_it, end_it, decoded);
@@ -66,8 +76,10 @@ void expect_round_trip(T value)
 {
   std::byte buffer[16]{};
 
+  // Encode the source value into a scratch buffer first.
   std::byte* const end_it{ encode_dint(buffer, buffer + 16, value) };
 
+  // Then decode it back and make sure no trailing bytes remain unread.
   std::byte const* read_it{ buffer };
   T decoded{};
   decode_dint<Throw>(read_it, end_it, decoded);
@@ -84,21 +96,23 @@ void expect_round_trip(T value)
 template <typename T>
 void expect_min_max_round_trip()
 {
+  // Probe the full range anchor points for the target integer type.
   expect_round_trip<T>(std::numeric_limits<T>::lowest());
   expect_round_trip<T>(T(0));
   expect_round_trip<T>(std::numeric_limits<T>::max());
 }
 
+// Runtime coverage
 TEST(DynamicIntConstexpr, SupportsCompileTimeEncoding)
 {
+  // Both constexpr entry points should agree on the known signed payload.
   EXPECT_TRUE(kConstexprEncodePointerOverloadWorks);
-  EXPECT_EQ(2u, kConstexprEncodedTemplate.size());
-  EXPECT_EQ(std::byte{0xd7}, kConstexprEncodedTemplate[0]);
-  EXPECT_EQ(std::byte{0x44}, kConstexprEncodedTemplate[1]);
+  EXPECT_TRUE(kConstexprEncodedTemplateWorks);
 }
 
 TEST(DynamicIntEncode, EncodesKnownUnsignedValues)
 {
+  // Check one representative positive value at each unsigned width.
   expect_encoding<uint8_t>(
     uint8_t(1),
     {std::byte{0x01}}
@@ -122,6 +136,7 @@ TEST(DynamicIntEncode, EncodesKnownUnsignedValues)
 
 TEST(DynamicIntEncode, EncodesKnownSignedValues)
 {
+  // Check both positive and negative representatives across signed widths.
   expect_encoding<int8_t>(
     int8_t(2),
     {std::byte{0x02}}
@@ -165,16 +180,19 @@ TEST(DynamicIntEncode, EncodesKnownSignedValues)
 
 TEST(DynamicIntEncode, UsesExtraSignByteOnlyWhenNeeded)
 {
+  // Positive values at the sign boundary need an extra byte to stay positive.
   expect_encoding<int8_t>(
     int8_t(64),
     {std::byte{0xc0}, std::byte{0x00}}
   );
 
+  // The matching negative boundary still fits in one encoded byte.
   expect_encoding<int8_t>(
     int8_t(-64),
     {std::byte{0x7f}}
   );
 
+  // The signed extremes should still round-trip through the chosen encoding.
   expect_encoding<int8_t>(
     std::numeric_limits<int8_t>::max(),
     {std::byte{0xff}, std::byte{0x00}}
@@ -188,6 +206,7 @@ TEST(DynamicIntEncode, UsesExtraSignByteOnlyWhenNeeded)
 
 TEST(DynamicIntRoundTrip, HandlesMinZeroMaxForIntegerTypes)
 {
+  // Reuse the same lowest/zero/max contract at every supported width.
   expect_min_max_round_trip<uint8_t>();
   expect_min_max_round_trip<int8_t>();
 
@@ -203,27 +222,33 @@ TEST(DynamicIntRoundTrip, HandlesMinZeroMaxForIntegerTypes)
 
 TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
 {
+  // Build one mixed stream that exercises every supported integer family.
   std::byte buffer[21]{};
   std::byte* write_it{ buffer };
 
+  // Encode the one-byte values first.
   write_it = encode_dint(write_it, buffer + 21, uint8_t(1));
   write_it = encode_dint(write_it, buffer + 21, int8_t(2));
   write_it = encode_dint(write_it, buffer + 21, int8_t(-3));
 
+  // Then append the 16-bit values.
   write_it = encode_dint(write_it, buffer + 21, uint16_t(400));
   write_it = encode_dint(write_it, buffer + 21, int16_t(500));
   write_it = encode_dint(write_it, buffer + 21, int16_t(-600));
 
+  // Then the 32-bit values.
   write_it = encode_dint(write_it, buffer + 21, uint32_t(700));
   write_it = encode_dint(write_it, buffer + 21, int32_t(800));
   write_it = encode_dint(write_it, buffer + 21, int32_t(-900));
 
+  // Finish the stream with the 64-bit values.
   write_it = encode_dint(write_it, buffer + 21, uint64_t(1000));
   write_it = encode_dint(write_it, buffer + 21, int64_t(1100));
   write_it = encode_dint(write_it, buffer + 21, int64_t(-1200));
 
   ASSERT_EQ(buffer + 21, write_it);
 
+  // Decode back in the same order so iterator state is exercised too.
   uint8_t uint8_v{};
   int8_t int8_v{};
   uint16_t uint16_v{};
@@ -235,6 +260,7 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
 
   std::byte const* read_it{ buffer };
 
+  // The first three values cover the one-byte cases.
   decode_dint<Throw>(read_it, write_it, uint8_v);
   EXPECT_EQ(1, uint8_v);
 
@@ -244,6 +270,7 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
   decode_dint<Throw>(read_it, write_it, int8_v);
   EXPECT_EQ(-3, int8_v);
 
+  // Then step through the 16-bit encodings.
   decode_dint<Throw>(read_it, write_it, uint16_v);
   EXPECT_EQ(400, uint16_v);
 
@@ -253,6 +280,7 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
   decode_dint<Throw>(read_it, write_it, int16_v);
   EXPECT_EQ(-600, int16_v);
 
+  // Then the 32-bit encodings.
   decode_dint<Throw>(read_it, write_it, uint32_v);
   EXPECT_EQ(700u, uint32_v);
 
@@ -262,6 +290,7 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
   decode_dint<Throw>(read_it, write_it, int32_v);
   EXPECT_EQ(-900, int32_v);
 
+  // Finish with the 64-bit encodings and confirm the stream is exhausted.
   decode_dint<Throw>(read_it, write_it, uint64_v);
   EXPECT_EQ(1000u, uint64_v);
 
@@ -275,6 +304,7 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
 
 TEST(DynamicIntDecode, ReturnsValueFromValueReturningOverload)
 {
+  // The value-returning overload should decode and advance the iterator.
   std::byte const buffer[2]{
     std::byte{0xd7},
     std::byte{0x44}
@@ -288,6 +318,7 @@ TEST(DynamicIntDecode, ReturnsValueFromValueReturningOverload)
 
 TEST(DynamicIntFailure, DecodeThrowsWhenSourceRangeIsEmpty)
 {
+  // An empty source range cannot even provide the first encoded byte.
   std::byte const buffer[1]{};
   std::byte const* read_it{ buffer };
   uint8_t value{};
@@ -299,6 +330,7 @@ TEST(DynamicIntFailure, DecodeThrowsWhenSourceRangeIsEmpty)
 
 TEST(DynamicIntNoThrow, DecodeLeavesIteratorWhenSourceRangeIsEmpty)
 {
+  // The no-throw variant should preserve both iterator and destination state.
   std::byte const buffer[1]{};
   std::byte const* read_it{ buffer };
   uint8_t value{ 42 };
@@ -310,6 +342,7 @@ TEST(DynamicIntNoThrow, DecodeLeavesIteratorWhenSourceRangeIsEmpty)
 
 TEST(DynamicIntFailure, DecodeThrowsForUnterminatedValue)
 {
+  // A continuation byte with no terminator should be rejected.
   std::byte const buffer[1]{std::byte{0x80}};
 
   std::byte const* read_it{ buffer };
@@ -322,6 +355,7 @@ TEST(DynamicIntFailure, DecodeThrowsForUnterminatedValue)
 
 TEST(DynamicIntNoThrow, DecodeResetsIteratorForUnterminatedValue)
 {
+  // The no-throw variant should rewind the iterator on partial input.
   std::byte const buffer[1]{std::byte{0x80}};
 
   std::byte const* read_it{ buffer };
@@ -334,6 +368,7 @@ TEST(DynamicIntNoThrow, DecodeResetsIteratorForUnterminatedValue)
 
 TEST(DynamicIntFailure, DecodeThrowsWhenValueDoesNotFitTargetType)
 {
+  // This byte sequence decodes to a value larger than uint8_t can hold.
   std::byte const buffer[2]{
     std::byte{0x80},
     std::byte{0x02}
@@ -349,6 +384,7 @@ TEST(DynamicIntFailure, DecodeThrowsWhenValueDoesNotFitTargetType)
 
 TEST(DynamicIntNoThrow, DecodeResetsIteratorWhenValueDoesNotFitTargetType)
 {
+  // The no-throw path should leave the caller's destination untouched.
   std::byte const buffer[2]{
     std::byte{0x80},
     std::byte{0x02}
