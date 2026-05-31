@@ -103,6 +103,7 @@ if(DINT_BUILD_TESTS)
     tests/test_machine_num.cpp
     tests/test_constexpr_cstr.cpp
     tests/test_constexpr_string.cpp
+    tests/test_masked_bits.cpp
   )
 
   add_executable(logger_tests
