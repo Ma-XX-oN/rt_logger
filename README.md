@@ -35,7 +35,7 @@ When compiled, this is to be a very small, fast and resilient logger.
 
 Data stored as minimally as possible with little overhead.
 
-I'm hoping to have minimal code binary overhead from the logger.
+I'm hoping to have minimal binary footprint.
 
 ### Fast
 
@@ -128,16 +128,16 @@ of reading.  All values are stored in the machine's representation, meaning that
 the endianness of the values are kept as is and has to be fixed to the reader's
 end.  This is done to reduce the writer's latency as much as possible.
 
-Any value in a string that is between [1, 31] or [0x01, 0x1F] inclusive are
-considered control codes. Subtract 1 from that value results in an inclusive
+Any value in a string that is between [1, 31] or [0x01, 0x1F] inclusive is
+considered a control code. Subtracting 1 from that value results in an inclusive
 range of [0, 30] or [0x00, 0x1E].
 
 Backslash, tab and LF are encoded in the string as R"(\\\\)", R"(\n)" and
-R"(\t)" respectively.  I.e.  Those characters are stored as escaped
-characters and are represented by 2 characters.
+R"(\t)" respectively.  I.e.  those characters are stored as escaped characters
+and are represented by 2 characters.
 
-These specifications prevents embedding a NUL into a string and make it
-easier to use flags on the integer set for specific operations.
+These specifications prevent embedding a NUL into a string and make it easier to
+use flags on the integer set for specific operations.
 
 There are 3 different control sequences.
 
@@ -162,14 +162,14 @@ There are 3 different control sequences.
 
       All of those described previously can be prefixed with an Array MODIFIER.
       That consists of Array, followed by a dint and can be stacked 3 levels
-      deep. That limitation only exists is only because I'm not sure how to
-      represent 4D arrays on output.
+      deep. That limitation only exists because I'm not sure how to represent 4D
+      arrays on output.
 
 2. FORMATTING INFO
 
    The formatting info consists of 1-6 bytes (2-12 if using arrays), depending
    on what is requested. This excludes the starting eType byte.  A sequence
-   always ends with a eFmtLetter byte.  Sizes stated are minimal values.  If
+   always ends with an eFmtLetter byte.  Sizes stated are minimal values.  If
    embedded dints specified are greater than 127, then it could mean a larger
    size.  Embedded dints of 0 are considered an error.  If done as text, it
    would easily be twice the size.
@@ -181,7 +181,7 @@ There are 3 different control sequences.
    ```
 
    When arrays are displayed, they are space delimited when minimum width
-   formatting is specified, otherwise is it comma delimited.  This is actually
+   formatting is specified, otherwise it is comma delimited.  This is actually
    dependent on the renderer side, so it could be configurable there.
 
    ```text
@@ -231,7 +231,7 @@ There are 3 different control sequences.
 ##### Ensuring Generated FString CRCs Are Unique
 
 To ensure that all FStrings generate a unique CRC, run the compiler on each
-source file in preprocess-only mode.  Just call compiler with `-DSOURCE_FILE
+source file in preprocess-only mode.  Just call the compiler with `-DSOURCE_FILE
 <source_file>` on the following code to do the first pass.  Append all of these
 together.
 
@@ -338,9 +338,8 @@ enum eEnumStorageType : std::uint8_t {
    Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
   UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
 
-  // states how group_bitmask, bitmask and enum_value are stored
-  CompressBitmask   = 0x08, // Encode as dint
-  CompressEnumValue = 0x10, // Condense and encode as dint
+  // states how constrained group_bitmask, bitmask and enum_value values are stored
+  Compress          = 0x08, // Encode constrained values as condensed dints under the parent scope
 };
 ```
 
@@ -356,6 +355,13 @@ This format makes scope explicit in each `GroupIf*` command. The block's
 scope used by a conditional block is visible at the block header instead of
 being ambient mutable state.
 
+`Compress` changes only how constrained values are encoded, not the semantics
+below. If `Compress` is clear, constrained `group_bitmask`, `bitmask`, and
+`enum_value` values are stored full width. If `Compress` is set, those same
+values are stored as condensed dints relative to the parent
+`current_scope_bitmask` and are decoded back before the execution rules below
+are applied.
+
 The command set is:
 
 ```c++
@@ -365,21 +371,21 @@ enum eEnumCommand : std::uint8_t {
 
   Terminate          = 0 << 5,  // End of stream if stream length not known.
 
-  Named              = 1 << 5,  // Specifies a list of pairs.
+  Named              = 1 << 5,  // Specifies pairs; compares (value & current or stated bitmask) to enum_value.
+   HasBitmask        = 1 << 4,  //   States if bitmask is specified.
   
-  Numeric            = 2 << 5,  // Specifies name for bits for current bitmask.
+  Numeric            = 2 << 5,  // Specifies name for bits for stated bitmask.
    FmtRightShiftBits = 1 << 0,  //   Shift bits so least significant bits coinciding with bitmask are at the 0th bit.
    FmtPackBits       = 1 << 1,  //   Condense bits coinciding with bitmask.
    FmtIsSigned       = 1 << 2,  //   Sign extend bit coinciding with most significant bit of bitmask.
-   Unused            = 1 << 3,  //   Unused Numeric/GroupIfNumeric flag.
 
   GroupIf            = 3 << 5,  // If group_bitmask set, use bitmask on following commands.
   GroupIfNamed       = 4 << 5,  // If group_bitmask set, use bitmask on following pairs.
-  ContinueScope      = 5 << 5,  // Continue GroupIf/GroupIfNamed scope.
+  ContinueScope      = 5 << 5,  // Continue Named/GroupIf/GroupIfNamed/Else branch.
   Else               = 6 << 5,  // Continue GroupIf/GroupIfNamed scope as else group.
 
-  GroupIfNumeric     = 7 << 5,  // If group_bitmask set, specify name for bits for current bitmask.
-   Negate            = 1 << 4,  //   Negates GroupIfNumeric, so that it acts as an Else.
+  GroupIfNumeric     = 7 << 5,  // If group_bitmask set, specify name for bits for stated bitmask.
+   Negate            = 1 << 3,  //   Negates GroupIfNumeric, so that it acts as an Else.
    // Can also take Fmt* flags.
 };
 ```
@@ -390,12 +396,12 @@ An enum definition stream consists of one command following another.
 
 The basic data items are:
 
-| item          | meaning                              |
-|---------------|--------------------------------------|
-| `bitmask`     | constrains comparisons or numeric output |
-| `enum_value`  | masked enum value to compare against |
-| `name`        | emitted name or numeric field label  |
-| `pair`        | (`enum_value`, `name`)               |
+| item            | meaning                                     |
+|-----------------|---------------------------------------------|
+| `bitmask`       | constrains comparisons or numeric output    |
+| `enum_value`    | masked enum value to compare against        |
+| `name`          | emitted name or numeric field label         |
+| `pair`          | (`enum_value`, `name`)                      |
 | `group_bitmask` | single selector bit for a conditional group |
 
 The commands are:
@@ -403,20 +409,21 @@ The commands are:
 | command | encoded parameters | external parameters | meaning |
 |---------|--------------------|---------------------|---------|
 | `Terminate` | `Unused` | none | Ends stream processing. Required when the stream length is not known externally. |
-| `Named` | `Pair_count` | `pair`, ... | Compares `(value & current_scope_bitmask)` against each `enum_value` and emits the matching `name`. |
+| `Named` | `Pair_count` and optional `Has_bitmask` | `pair`, ... or `bitmask`, `pair`, ... | Uses the effective bitmask for that command, compares the current value against each `enum_value`, and emits the matching `name`. |
 | `Numeric` | `Format` | `bitmask`, `name` | Emits a numeric representation of `value & bitmask` using the selected format. |
 | `GroupIf` | `If_cmd_count` | `group_bitmask`, `bitmask`, `command`, ... | If `(value & group_bitmask) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands. |
 | `GroupIfNamed` | `If_pair_count` | `group_bitmask`, `bitmask`, `pair`, ... | Conditional `Named` block in a nested scope. |
 | `GroupIfNumeric` | `Format` and optional `Negate` | `group_bitmask`, `bitmask`, `name` | Conditional `Numeric` block in a nested scope. `Negate` makes the numeric output belong to the `else` branch instead of the `if` branch, so `GroupIfNumeric` does not use a separate `Else`. |
 | `Else` | `Else_pair_count` or `Else_cmd_count` | `pair`, ... or `command`, ... | Alternate branch for the immediately preceding `GroupIf` or `GroupIfNamed` block. The `Else` branch uses the same block scope `bitmask` as the corresponding `if` branch. |
-| `ContinueScope` | `Cont_pair_count` or `Cont_cmd_count` | `pair`, ... or `command`, ... | Extends the immediately preceding scope body when more pairs or commands are needed than fit in the originating count field. |
+| `ContinueScope` | `Cont_pair_count` or `Cont_cmd_count` | `pair`, ... or `command`, ... | Extends the immediately preceding branch when more pairs or commands are needed than fit in the originating count field. |
 
 The encoded parameters are:
 
 | parameter | meaning |
 |-----------|---------|
 | `Unused` | Reserved. Must be zero. |
-| `Pair_count` | Number of pairs following `Named` (1-32). |
+| `Has_bitmask` | Makes `Named` take a `bitmask` for that command. |
+| `Pair_count` | Number of pairs following `Named` (1-16). |
 | `If_pair_count` | Number of pairs following `GroupIfNamed` (0-31). |
 | `Else_pair_count` | Number of pairs following `Else` for a named branch (1-32). |
 | `Cont_pair_count` | Number of pairs following `ContinueScope` for a named branch (1-32). |
@@ -429,32 +436,48 @@ The encoded parameters are:
 | `FmtIsSigned` | After shifting or packing, treat the most significant extracted bit as the sign bit and sign-extend it. |
 | `Negate` | Makes `GroupIfNumeric` refer to the `else` branch. |
 
+> 💡NOTE:
+>
+> Count fields that allow zero are stored directly. Count fields that do not
+> allow zero are stored as one less than the actual count, so the full payload
+> bit range can be used.
+
 Execution rules:
 
 1. Processing begins with `current_scope_bitmask = ~0`.
-2. `Named` compares real masked enum values. Values are not shifted before comparing:
-   `(value & current_scope_bitmask) == enum_value`.
-3. `Numeric` formats `value & bitmask`. `Format` controls how the masked bits are interpreted.
-4. `group_bitmask` must contain exactly one bit. It selects which branch of a conditional group is used.
+2. `Named` uses an effective bitmask.
+   If `Has_bitmask` is clear, `effective_bitmask = current_scope_bitmask`.
+   If `Has_bitmask` is set, the next item is a `bitmask`, and
+   `effective_bitmask = bitmask` for that `Named` command only.
+   `Named` compares real masked enum values. Values are not shifted before
+   comparing: `(value & effective_bitmask) == enum_value`.
+3. `Numeric` formats `value & bitmask`. `Format` controls how the masked bits
+   are interpreted.
+4. `group_bitmask` must contain exactly one bit. It selects which branch of a
+   conditional group is used.
 5. Entering `GroupIf`, `GroupIfNamed`, or `GroupIfNumeric` evaluates whether
    `(value & group_bitmask) != 0`.
 6. Each `GroupIf*` command introduces a new scope bitmask. On entry, the
    current scope bitmask is pushed and replaced with the block's `bitmask`. On
    exit, the previous scope bitmask is restored.
-7. The block `bitmask` of every `GroupIf*` command must be a subset of the
-   current scope bitmask:
-   `(bitmask & ~current_scope_bitmask) == 0`.
-   A stream that violates this rule is invalid.
+7. `group_bitmask`, `bitmask`, and `enum_value` are all constrained by the
+   parent `current_scope_bitmask` and must be subsets of it. This allows
+   `Compress` to encode them in condensed form. A stream that violates these
+   constraints is invalid.
 8. The matching `Else` branch reuses the same scope bitmask as the
    corresponding conditional branch.
 9. `ContinueScope` continues the current branch at the same nesting level and
    with the same scope bitmask. It does not introduce a new condition.
-10. A conditional scope remains open only while the next command continues that
-    same branch. I.e. `GroupIf` and `GroupIfNamed` can be continued using `Else`
-    or `ContinueScope`.
-11. `Else` is only valid immediately after `GroupIf` or `GroupIfNamed`. It is
-    invalid after `GroupIfNumeric`; use `Negate` there instead.
-12. `ContinueScope` is only valid immediately after the branch it extends. A
+10. `GroupIfNumeric` is self-contained. It does not use `Else` or
+    `ContinueScope`; use `Negate` to make it apply to the `else` case.
+11. A `GroupIf` or `GroupIfNamed` `if` branch may be followed immediately by
+    `Else` or `ContinueScope`. An `Else` branch may be followed immediately by
+    `ContinueScope`. Once the next command is neither a valid `Else` nor a valid
+    `ContinueScope` for that branch, the branch ends and the previous scope
+    bitmask is restored.
+12. `Else` is only valid immediately after `GroupIf` or `GroupIfNamed`.
+13. `ContinueScope` is only valid immediately after the branch it extends, i.e.
+    `Named`, `GroupIf`, `GroupIfNamed`, `Else` or another `ContinueScope`.  A
     named branch may be extended only by more `pair`s, and a command branch may
     be extended only by more `command`s.
 
@@ -517,9 +540,9 @@ A continued block's CRC is seeded by the previous block's CRC.  A
 ##### Field 6: Fence
 
 The fence is at the end because a block isn't finished unless a fence is found.
-Before the first block is emitted, there will have an explicit fence to start
-the blocks off.  Might be a different sequence like "!!!!" to show that this is
-the very first of a logging run.
+Before the first block is emitted, there will be an explicit fence to start the
+blocks off.  Might be a different sequence like "!!!!" to show that this is the
+very first of a logging run.
 
 #### Payload specifications
 
