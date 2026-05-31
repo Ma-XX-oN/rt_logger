@@ -1,6 +1,3 @@
-#ifndef CONSTEXPR_ALGORITHM_HPP
-#define CONSTEXPR_ALGORITHM_HPP
-
 /**
  * @file algorithm.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
@@ -10,6 +7,9 @@
  *
  * @copyright Copyright (c) 2026
  */
+#ifndef CONSTEXPR_ALGORITHM_HPP
+#define CONSTEXPR_ALGORITHM_HPP
+
 #include <iterator>
 
 namespace Constexpr {

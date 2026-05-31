@@ -1,6 +1,3 @@
-#ifndef CONSTEXPR_INT_TO_STRING_HPP
-#define CONSTEXPR_INT_TO_STRING_HPP
-
 /**
  * @file int_to_string.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
@@ -12,6 +9,9 @@
  *
  * NODE: Incomplete
  */
+#ifndef CONSTEXPR_INT_TO_STRING_HPP
+#define CONSTEXPR_INT_TO_STRING_HPP
+
 #include <cstdint>
 #include "algorithm.hpp"
 #include "bitwise_enum.hpp"

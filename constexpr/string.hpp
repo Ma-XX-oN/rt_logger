@@ -1,5 +1,3 @@
-#ifndef CONSTEXPR_STRING_HPP
-#define CONSTEXPR_STRING_HPP
 /**
  * @file string.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
@@ -11,6 +9,9 @@
  * @copyright Copyright (c) 2026
  *
  */
+#ifndef CONSTEXPR_STRING_HPP
+#define CONSTEXPR_STRING_HPP
+
 #include <array>
 #include <cassert>
 #include <iterator>

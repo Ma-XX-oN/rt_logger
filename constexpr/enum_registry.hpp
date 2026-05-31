@@ -1,5 +1,3 @@
-#ifndef ENUM_REGISTRY_HPP
-#define ENUM_REGISTRY_HPP
 /**
  * @file enum_registry.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
@@ -11,6 +9,8 @@
  * 
  * TODO: Need to flesh this out more.
  */
+#ifndef ENUM_REGISTRY_HPP
+#define ENUM_REGISTRY_HPP
 
 #include <iterator>
 #include <utility>
