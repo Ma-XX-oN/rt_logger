@@ -12,64 +12,10 @@
 #define CONSTEXPR_MASKED_BITS_HPP
 #include <cstddef>
 #include <stdexcept>
-#include <type_traits>
+#include "type_traits.hpp"
 #include <limits>
 
 namespace Constexpr {
-  namespace impl {
-    /**
-     * @brief Maps an enum or integral type to an unsigned type of the same width.
-     *
-     * For enums, the mapped type is the unsigned form of the enum's underlying
-     * type. For integral types, the mapped type is the unsigned form of the
-     * type itself.
-     *
-     * @tparam T - Enum or integral type to map.
-     */
-    template <typename T, bool IsEnum = std::is_enum<T>::value>
-    struct unsigned_equivalent {
-        using type = std::make_unsigned_t<T>;
-    };
-
-    template <typename T>
-    struct unsigned_equivalent<T, true> {
-        using type = std::make_unsigned_t<std::underlying_type_t<T>>;
-    };
-
-    /**
-     * @brief Convenience alias for \c unsigned_equivalent<T>::type.
-     *
-     * @tparam T - Enum or integral type to map.
-     */
-    template <typename T>
-    using unsigned_equivalent_t = typename unsigned_equivalent<T>::type;
-
-    /**
-     * @brief Maps an enum or integral type to an integer type of the same width
-     *   and sign type.
-     *
-     * @tparam T - Enum or integral type to map.
-     */
-    template <typename T, bool IsEnum = std::is_enum<T>::value>
-    struct underlying_equivalent {
-        using type = T;
-    };
-
-    template <typename T>
-    struct underlying_equivalent<T, true> {
-        using type = std::underlying_type_t<T>;
-    };
-
-    /**
-     * @brief Convenience alias for \c underlying_equivalent<T>::type.
-     *
-     * @tparam T - Enum or integral type to map.
-     */
-    template <typename T>
-    using underlying_equivalent_t = typename underlying_equivalent<T>::type;
-
-  } // namespace impl
-
 /**
  * @brief Finds the index of the least significant set bit.
  *
@@ -80,8 +26,7 @@ namespace Constexpr {
  */
 template <typename E>
 constexpr std::size_t least_set_bit_index(E mask) {
-  using T = impl::unsigned_equivalent_t<E>;
-  T mask_{ static_cast<T>(mask) };
+  auto mask_{ make_unsigned_equivalent(mask) };
   if (!mask_) {
     throw std::invalid_argument("mask cannot be 0");
   }
@@ -111,12 +56,12 @@ constexpr std::size_t least_set_bit_index(E mask) {
  *   a sign bit, which is to be extended in the resulting value.  Result is
  *   treated as a negative value if the underlying equivalent type is a signed
  *   type.
- * @return impl::underlying_equivalent_t<E> - Packed result.
+ * @return underlying_equivalent_t<E> - Packed result.
  * @throws std::invalid_argument if \p mask == \c 0.
  */
 template <typename E>
 constexpr auto condense(E mask, E value, bool align_to_lsb, bool sign_extend = false) {
-  using T = impl::unsigned_equivalent_t<E>;
+  using T = unsigned_equivalent_t<E>;
   T mask_{ static_cast<T>(mask) };
   std::size_t min_bit{ least_set_bit_index(mask) };
   mask_ >>= min_bit;
@@ -146,11 +91,11 @@ constexpr auto condense(E mask, E value, bool align_to_lsb, bool sign_extend = f
     if (is_negative) {
       T extend{ static_cast<T>(~(static_cast<T>(~0) >> shift_back)) };
       condensed_value >>= shift_back;
-      return static_cast<impl::underlying_equivalent_t<E>>(
+      return static_cast<underlying_equivalent_t<E>>(
         condensed_value | extend);
     }
   }
-  return static_cast<impl::underlying_equivalent_t<E>>(
+  return static_cast<underlying_equivalent_t<E>>(
     condensed_value >> shift_back);
 }
 
@@ -172,8 +117,8 @@ constexpr auto condense(E mask, E value, bool align_to_lsb, bool sign_extend = f
  * @throws std::invalid_argument if \p mask == \c 0.
  */
 template <typename E>
-constexpr E expand(E mask, impl::unsigned_equivalent_t<E> value, bool read_from_lsb) {
-  using T = impl::unsigned_equivalent_t<E>;
+constexpr E expand(E mask, unsigned_equivalent_t<E> value, bool read_from_lsb) {
+  using T = unsigned_equivalent_t<E>;
   T mask_{ static_cast<T>(mask) };
   std::size_t min_bit{ least_set_bit_index(mask) };
   mask_ >>= min_bit;

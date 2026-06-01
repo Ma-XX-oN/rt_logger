@@ -140,7 +140,7 @@ constexpr bool kConstexprIntegralReturnTypesMatchContract{ []() constexpr {
   // Integral masks should condense to the underlying-equivalent result type.
   bool const condense_type_ok{ std::is_same_v<
     decltype(Constexpr::condense(kSparseMask, kSparseValue, true)),
-    Constexpr::impl::underlying_equivalent_t<std::uint8_t>
+    Constexpr::underlying_equivalent_t<std::uint8_t>
   > };
 
   // Expanding should restore the original integral type.
@@ -157,7 +157,7 @@ constexpr bool kConstexprEnumReturnTypesMatchContract{ []() constexpr {
   // Enum masks should condense through their underlying-equivalent result type.
   bool const condense_type_ok{ std::is_same_v<
     decltype(Constexpr::condense(SparseEnumBits::Mask, SparseEnumBits::Value, true)),
-    Constexpr::impl::underlying_equivalent_t<SparseEnumBits>
+    Constexpr::underlying_equivalent_t<SparseEnumBits>
   > };
 
   // Expanding should recover the enum type itself, not the storage type.
@@ -299,13 +299,13 @@ static_assert(kConstexprWiderIntegralWidthsWork);
  *
  * @tparam T Enum or integral type to convert.
  * @param value Value to convert.
- * @return Constexpr::impl::unsigned_equivalent_t<T> Unsigned representation of
+ * @return Constexpr::unsigned_equivalent_t<T> Unsigned representation of
  *   \p value.
  */
 template <typename T>
-constexpr Constexpr::impl::unsigned_equivalent_t<T> as_unsigned(T value)
+constexpr Constexpr::unsigned_equivalent_t<T> as_unsigned(T value)
 {
-  using U = Constexpr::impl::unsigned_equivalent_t<T>;
+  using U = Constexpr::unsigned_equivalent_t<T>;
   return static_cast<U>(value);
 }
 
@@ -320,7 +320,7 @@ constexpr Constexpr::impl::unsigned_equivalent_t<T> as_unsigned(T value)
 template <typename T>
 void expect_expand_after_condense_round_trip(T mask, T value)
 {
-  using U = Constexpr::impl::unsigned_equivalent_t<T>;
+  using U = Constexpr::unsigned_equivalent_t<T>;
 
   // The round-trip should never recreate bits outside the original mask.
   U const expected{ static_cast<U>(as_unsigned(value) & as_unsigned(mask)) };
@@ -352,7 +352,7 @@ void expect_expand_after_condense_round_trip(T mask, T value)
 template <typename T>
 void expect_condense_after_expand_round_trip(
   T mask,
-  Constexpr::impl::unsigned_equivalent_t<T> packed,
+  Constexpr::unsigned_equivalent_t<T> packed,
   bool read_from_lsb
 )
 {
