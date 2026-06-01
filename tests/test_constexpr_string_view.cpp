@@ -1,7 +1,17 @@
-#include "constexpr/CStr.hpp"
-
+/**
+ * @file test_constexpr_string_view.cpp
+ * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
+ * @brief Test that string_view works as expected.
+ * @version 0.1
+ * @date 2026-05-31
+ *
+ * @copyright Copyright (c) 2026
+ *
+ * This is a hold over from when I implemented my own version of this.  I still
+ * think that the tests are useful so I'm keeping them for now.
+ */
+#include "constexpr/string.hpp"
 #include <gtest/gtest.h>
-
 #include <stdexcept>
 #include <string_view>
 
@@ -16,7 +26,7 @@
 // Compile-time coverage
 constexpr bool kConstexprDefaultConstructionWorks{ []() constexpr {
   // Default construction should produce an empty counted C string.
-  Constexpr::CStr str{""};
+  std::string_view str{""};
   return str.empty()
     && str.size() == 0u
     && str.length() == 0u
@@ -28,7 +38,7 @@ static_assert(kConstexprDefaultConstructionWorks);
 
 constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
   // Construction from a literal should expose the full logical payload.
-  Constexpr::CStr str{"alpha"};
+  std::string_view str{"alpha"};
 
   // Accessors and iterators should all agree on the five-character contents.
   bool const access_ok{
@@ -46,7 +56,7 @@ constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
 
   // View-style conversions should expose the same logical text too.
   bool const view_ok{
-    str.max_size() == Constexpr::CStr::npos
+    str.max_size() == std::string_view::npos
     && str == std::string_view("alpha")
     && static_cast<std::string_view>(str) == std::string_view("alpha")
   };
@@ -57,9 +67,9 @@ static_assert(kConstexprLiteralConstructionWorks);
 
 constexpr bool kConstexprCompareWorks{ []() constexpr {
   // Compare equal and ordered strings through both compare() and operators.
-  Constexpr::CStr alpha{"alpha"};
-  Constexpr::CStr beta{"beta"};
-  Constexpr::CStr also_alpha{"alpha"};
+  std::string_view alpha{"alpha"};
+  std::string_view beta{"beta"};
+  std::string_view also_alpha{"alpha"};
 
   // compare() should agree with lexical ordering.
   bool const compare_ok{
@@ -84,7 +94,7 @@ static_assert(kConstexprCompareWorks);
 
 constexpr bool kConstexprAtWorks{ []() constexpr {
   // at() should read valid logical characters at both ends of the string.
-  Constexpr::CStr str{"alpha"};
+  std::string_view str{"alpha"};
   return str.at(0) == 'a'
     && str.at(4) == 'a';
 }() };
@@ -92,8 +102,8 @@ static_assert(kConstexprAtWorks);
 
 constexpr bool kConstexprMemberSwapWorks{ []() constexpr {
   // Member swap should exchange both logical contents and sizes.
-  Constexpr::CStr lhs{"left"};
-  Constexpr::CStr rhs{"right"};
+  std::string_view lhs{"left"};
+  std::string_view rhs{"right"};
   lhs.swap(rhs);
   return lhs == std::string_view("right")
     && rhs == std::string_view("left");
@@ -102,8 +112,8 @@ static_assert(kConstexprMemberSwapWorks);
 
 constexpr bool kConstexprFreeSwapWorks{ []() constexpr {
   // Free swap should route through the same observable behavior.
-  Constexpr::CStr lhs{"one"};
-  Constexpr::CStr rhs{"two"};
+  std::string_view lhs{"one"};
+  std::string_view rhs{"two"};
   using Constexpr::swap;
   swap(lhs, rhs);
   return lhs == std::string_view("two")
@@ -126,7 +136,7 @@ TEST(CStrConstexpr, SupportsCompileTimeEvaluation)
 TEST(CStrRuntime, PreservesStringAndStorageSemantics)
 {
   // Start from a normal runtime string literal.
-  Constexpr::CStr str{"hello"};
+  std::string_view str{"hello"};
 
   EXPECT_EQ(5u, str.size());
   EXPECT_EQ(5u, str.length());
@@ -136,7 +146,7 @@ TEST(CStrRuntime, PreservesStringAndStorageSemantics)
 TEST(CStrRuntime, AtRejectsEndIndexAndThrowsPastIt)
 {
   // at() should reject the end index just like std::string_view::at().
-  Constexpr::CStr str{"hello"};
+  std::string_view str{"hello"};
   std::size_t const end_index{ str.size() };
 
   // The logical end is already out of range.

@@ -101,7 +101,7 @@ if(DINT_BUILD_TESTS)
   set(DINT_TEST_SOURCES
     tests/test_dynamic_int.cpp
     tests/test_machine_num.cpp
-    tests/test_constexpr_cstr.cpp
+    tests/test_constexpr_string_view.cpp
     tests/test_constexpr_string.cpp
     tests/test_masked_bits.cpp
   )

@@ -1279,6 +1279,20 @@ namespace Constexpr
   inline constexpr void swap(string<N>& lhs, string<N>& rhs) noexcept {
     lhs.swap(rhs);
   }
+
+  /**
+   * @brief Exchanges the contents of two std::string_view containers.
+   *
+   * Needed in c++17 because swap<std::string_view>() isn't a constexpr
+   * function.
+   *
+   * @param lhs - Left-hand operand.
+   * @param rhs - Right-hand operand.
+   */
+  inline constexpr void swap(std::string_view& lhs, std::string_view& rhs) noexcept {
+    lhs.swap(rhs);
+  }
+
 } // namespace Constexpr
 
 #endif // CONSTEXPR_STRING_HPP
