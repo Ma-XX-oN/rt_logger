@@ -403,8 +403,10 @@ enum eTest : std::uint8_t {
   nothing, something
 };
 constexpr auto eDisc = build_enum_description<eTest>()
-  .Name(eTest::nothing, "NOTHING")      // named value
-  .Name(eTest::something, "Something"); // another named value
+  .NameStart()
+    .Name(eTest::nothing, "NOTHING")      // named value
+    .Name(eTest::something, "Something") // another named value
+  .End();
 
 auto eValue = eDisc.value(eDisc["NOTHING"]);
 
@@ -443,7 +445,8 @@ constexpr auto eDisc = build_enum_description<eTest>()
   .Else()
     .Name(eTest::hello, "hello")
     .Name(eTest::goodbye, "goodbye")
-    .Number("value");
+    .Number("value")
+  .End();
 
 // Using enums to get and set named values is unsafe when working with groups.
 // Consider:
@@ -485,7 +488,8 @@ auto eDisc = build_enum_description<eTest>()
   .Else("group2")
     .Name(eTest::hello, "hello")
     .Name(eTest::goodbye, "goodbye")
-    .Number("value");
+    .Number("value")
+  .End();
 auto eValue = eDisc.value(eDisc["goodbye"]);
 
 eValue = set(eDisc["NOTHING"]);                // ok because bit 7 is 0
@@ -504,8 +508,10 @@ Don't actually need an enum:
 
 ```cpp
 auto eDisc = build_enum_description<std::int8_t>()
-  .Name(0, "NOTHING")
-  .Name(1, "Something");
+  .NameStart()
+    .Name(0, "NOTHING")
+    .Name(1, "Something")
+  .End();
 
 auto eValue = eDisc.value(); // zero initialised
 auto eText = eValue.to_string();
