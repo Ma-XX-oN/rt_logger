@@ -61,6 +61,20 @@ namespace Constexpr
     }
 
     /**
+     * @brief Constructs a zero-filled counted string with a requested logical
+     *   size.
+     *
+     * @param chars_in_use - Number of logical characters to mark as in use.
+     *   Each logical character is initialised to `'\0'`.
+     */
+    explicit constexpr string(std::size_t chars_in_use) noexcept
+    : m_data{}
+    , m_size(chars_in_use)
+    {
+      assert(chars_in_use < N || !"Can't set more characters in use than are preallocated.");
+    }
+    
+    /**
      * @brief Constructs a string container from a string literal or char array.
      *
      * The logical string becomes the source array contents excluding the
