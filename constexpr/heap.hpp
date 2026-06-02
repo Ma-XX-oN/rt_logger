@@ -45,7 +45,6 @@ namespace Constexpr {
       */
     constexpr std::size_t add_string(std::string_view str_to_register) {
       auto length { memory.length() };
-      memory.resize( length);
       memory.append(str_to_register);
       memory.push_back('\0');
       return length;
