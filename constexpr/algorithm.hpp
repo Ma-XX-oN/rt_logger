@@ -52,15 +52,16 @@ namespace Constexpr {
    *
    * @tparam SrcIt - Source iterator type.
    * @tparam DstIt - Destination iterator type.
-   * @param dst_begin - Start of the destination range.
-   * @param dst_end - One past the end of the destination range.
    * @param src_begin - Start of the source range.
+   * @param src_end - One past the end of the source range.
+   * @param dst_begin - Start of the destination range.
    */
   template <typename SrcIt, typename DstIt>
-  constexpr void copy(DstIt dst_begin, DstIt dst_end, SrcIt src_begin) {
-    while (dst_begin != dst_end) {
+  constexpr DstIt copy(SrcIt src_begin, SrcIt src_end, DstIt dst_begin) {
+    while (src_begin != src_end) {
       *dst_begin++ = *src_begin++;
     }
+    return dst_begin;
   }
 
 } // namespace Constexpr
