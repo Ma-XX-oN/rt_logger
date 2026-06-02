@@ -591,13 +591,13 @@ struct enum_id {};
 template<typename T, char...Cs>
 constexpr auto fstr_param_type(char_sequence<Cs...> result = char_sequence<>{}) {
   if constexpr (std::is_array_v<std::remove_reference_t<T>>) {
-    constexpr auto array_size_dint { encode_dint(std::size(T{})) };
+    constexpr auto array_size_dint { Constexpr::encode_dint(std::size(T{})) };
     using DT = std::remove_extent_t<T>;
     return fstr_param_type<DT>(append_to_seq(result
       , append_to_seq<array_size_dint>(char_sequence<eType::Array>{})));
   }
   else if constexpr (std::is_enum_v<T>) {
-    constexpr auto enum_id_dint{ encode_dint(enum_id<T>::value) };
+    constexpr auto enum_id_dint{ Constexpr::encode_dint(enum_id<T>::value) };
     return append_to_seq(result
       , append_to_seq<enum_id_dint>(char_sequence<eType::Enum>{}));
   }
