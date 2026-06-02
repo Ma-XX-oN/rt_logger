@@ -1,7 +1,7 @@
 /**
  * @file dynamic_int.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
- * @brief Encodes/decodes integers into/from a std::byte buffer in/from a 7 bit
+ * @brief Encodes/decodes integers into/from a byte-like buffer in/from a 7 bit
  *   dynamic representation from/to a machine readable 8 bit representation.
  * @version 0.1
  * @date 2026-05-21
@@ -57,7 +57,10 @@
 #ifndef DYNAMIC_INT_HPP
 #define DYNAMIC_INT_HPP
 
+#include <cstdint>
+#include <iterator>
 #include <type_traits>
+#include "type_traits.hpp"
 #include <cstddef>
 #include <stdexcept>
 #include <cassert>
@@ -65,6 +68,42 @@
 #include <cstring>
 #include <limits>
 #include "ThrowNoThrow.hpp"
+#include "bit.hpp"
+
+/**
+ * @brief Tests that type \p T is a byte in size.
+ * 
+ * @tparam T - Type to check.
+ */
+template <typename T>
+inline constexpr bool is_byte_like_v =
+  std::is_same_v<std::remove_cv_t<T>, char> ||
+  std::is_same_v<std::remove_cv_t<T>, signed char> ||
+  std::is_same_v<std::remove_cv_t<T>, unsigned char> ||
+  std::is_same_v<std::remove_cv_t<T>, std::byte>;
+
+/**
+ * @brief Cast \b value to a \c std::uint8_t type.
+ * 
+ * @tparam B - \b value's type.
+ * @param value - value to convert.
+ * @return std::uint8_t - new value, truncated if needed.
+ */
+template <typename B>
+constexpr std::uint8_t u8(B value) {
+  return static_cast<std::uint8_t>(value);
+}
+
+/**
+ * @brief Cast \b value to a \c std::uint8_t type.
+ * 
+ * @param value - value to convert.
+ * @return std::uint8_t - new value.
+ */
+template <>
+constexpr std::uint8_t u8(std::byte value) {
+  return std::to_integer<std::uint8_t>(value);
+}
 
 /**
  * @brief Encodes \p v_src into the byte range [`dst_begin_it`, `dst_end_it`).
@@ -84,46 +123,81 @@
  * @param dst_end_it One-past-the-end of the destination range.
  * @param v_src Value to encode.
  *
- * @return Pointer one past the last byte written.
+ * @return Iterator one past the last byte written.
  */
-template <typename T
-  , std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, bool> = true>
-constexpr std::byte* encode_dint(std::byte* dst_begin_it, std::byte* const dst_end_it, T v_src)
-{
-  // Must always provide enough space to store value.
+template <typename T, typename ItB, typename ItE>
+constexpr ItB encode_dint(ItB dst_begin_it, ItE const dst_end_it, T v_src) {
+  static_assert(std::is_integral_v<T>, "T must be an integral type");
+  static_assert(!std::is_same_v<T, bool>, "T must not be bool");
+  static_assert(
+    !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
+    "Signed dint types require two's-complement representation"
+  );
+  static_assert(
+    std::numeric_limits<unsigned char>::digits == 8,
+    "dynamic_int requires 8-bit byte-like storage"
+  );
+
+  static_assert(Constexpr::is_bidirectional<ItB>, "dst_begin_it must be a bidirectional iterator");
+  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "dst_end_it must be a sentinel for dst_begin_it");
+  
+  using ItVT = typename std::iterator_traits<ItB>::value_type;
+  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
+
+  using Ref = decltype(*std::declval<ItB&>());
+  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
+  static_assert(std::is_assignable_v<Ref, ItVT>, "Iterator must be writable");
+  //////////////////////////////////////////////////////////////////////////////////////////////////
+
   using UT = std::make_unsigned_t<T>;
-  UT v{ UT(v_src) };
+  auto to_uint = Constexpr::overload {
+    [] (std::byte v) { return std::to_integer<UT>(v); },
+    [] (auto v)      { return     static_cast<UT>(v); },
+  };
+  auto to_itv = [] (auto v) { return static_cast<ItVT>(v); };
+
+  UT v{ to_uint(v_src) };
   constexpr bool is_signed { std::is_signed_v<T> };
   bool is_negative { is_signed ? v_src < 0 : false };
+  
+  // invert negative values
   if (is_signed) {
     if (v_src < 0) {
       v = UT(~v);
     }
   }
 
-  constexpr UT dint_payload { UT(0x7f) };
-  constexpr auto continuation_bit { std::byte{0x80} };
+  // write non-zero least significant bytes
+  constexpr UT dint_payload{ to_uint(0x7f) };
+  constexpr std::uint8_t continuation_bit{ 0x80u };
   do {
-    assert (dst_begin_it != dst_end_it || !"Not enough space to store in buffer");
-    std::byte lsb{ std::byte(v & dint_payload) };
+    assert(dst_begin_it != dst_end_it || !"Not enough space to store in buffer");
+    std::uint8_t lsb{ u8(v & dint_payload) };
     if (v >>= 7) {
       lsb |= continuation_bit;
     }
-    *dst_begin_it++ = lsb;
+    *dst_begin_it++ = to_itv(lsb);
   } while (v);
 
-  std::byte dst_sign_bit { std::byte{0x40} };
+  // update with sign if signed
   if (is_signed) {
-    auto last_most_sig_byte_it { dst_begin_it - 1 };
-    auto sign_value { is_negative ? dst_sign_bit : std::byte{0} };
-    if (std::byte{0} != (*last_most_sig_byte_it & dst_sign_bit)) {
+    constexpr std::uint8_t dst_sign_bit{ 0x40u };
+    auto last_most_sig_byte_it{ dst_begin_it };
+    --last_most_sig_byte_it;
+    auto sign_value { is_negative ? dst_sign_bit : u8(0) };
+    auto last{ u8(*last_most_sig_byte_it) };
+
+    if (last & dst_sign_bit) {
       // Bit for sign already in use, so need another byte for sign.
-      assert (dst_begin_it != dst_end_it || !"Not enough space to store in buffer");
-      *last_most_sig_byte_it |= continuation_bit;
-      *dst_begin_it++ = sign_value;
+      assert(dst_begin_it != dst_end_it || !"Not enough space to store in buffer");
+      last |= continuation_bit;
+      *last_most_sig_byte_it = to_itv(last);
+      *dst_begin_it++ = to_itv(sign_value);
+
     } else {
       // Bit for sign not in use, so use it for sign.
-      *last_most_sig_byte_it |= sign_value;
+      last |= sign_value;
+      *last_most_sig_byte_it = to_itv(last);
     }
   }
   return dst_begin_it;
@@ -192,6 +266,7 @@ constexpr auto encode_dint() {
   return b_dst;
 }
 
+
 /**
  * @brief Decodes a dint from the byte range [`src_begin_it`, `src_end_it`) and
  *   stores it in \p v_dst.
@@ -214,14 +289,34 @@ constexpr auto encode_dint() {
  *   - The dint is not terminated before \p src_end_it.
  *   - The decoded value requires more bits than fit in \p T.
  */
-template <typename Throws, typename T
-  , std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, bool> = true>
-constexpr T& decode_dint(std::byte const*& src_begin_it, std::byte const* const src_end_it, T& v_dst)
-{
+template <typename Throws, typename T, typename ItB, typename ItE>
+constexpr T& decode_dint(ItB& src_begin_it, ItE src_end_it, T& v_dst) {
+  static_assert(std::is_integral_v<T>, "T must be an integral type");
+  static_assert(!std::is_same_v<T, bool>, "T must not be bool");
+  static_assert(
+    !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
+    "Signed dint types require two's-complement representation"
+  );
+  static_assert(
+    std::numeric_limits<unsigned char>::digits == 8,
+    "dynamic_int requires 8-bit byte-like storage"
+  );
+
+  static_assert(Constexpr::is_bidirectional<ItB>, "src_begin_it must be a bidirectional iterator");
+  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "src_end_it must be a sentinel for src_begin_it");
+  
+  using ItVT = typename std::iterator_traits<ItB>::value_type;
+  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
+
+  using Ref = decltype(*std::declval<ItB&>());
+  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
+  //////////////////////////////////////////////////////////////////////////////////////////////////
+
   using UT = std::make_unsigned_t<T>;
-  auto to_int{ [] (std::byte v) {
-    return std::to_integer<UT>(v);
-  } };
+  auto to_uint = Constexpr::overload {
+    [] (std::byte v) { return std::to_integer<UT>(v); },
+    [] (auto v)      { return     static_cast<UT>(v); },
+  };
 
   if (src_begin_it == src_end_it) {
     if constexpr (std::is_same_v<Throws, Throw>) {
@@ -232,14 +327,15 @@ constexpr T& decode_dint(std::byte const*& src_begin_it, std::byte const* const 
   }
 
   // find last byte of dint
-  auto continuation_bit { std::byte{0x80} };
+  constexpr std::uint8_t continuation_bit { 0x80u };
   auto init_start_it { src_begin_it };
-  while (to_int(*src_begin_it & continuation_bit)) {
+  while (to_uint(u8(*src_begin_it) & continuation_bit)) {
     if (++src_begin_it == src_end_it) {
       break;
     }
   }
 
+  // read in number
   if (src_begin_it == src_end_it) {
     if constexpr (std::is_same_v<Throws, Throw>) {
       throw std::overflow_error("dint value not terminated in src_begin_it buffer.");
@@ -249,13 +345,13 @@ constexpr T& decode_dint(std::byte const*& src_begin_it, std::byte const* const 
     }
   }
 
-  auto last_digit_it { src_begin_it };
-
-  constexpr bool      is_signed{ std::is_signed_v<T> };
-  constexpr std::byte  sign_bit{ is_signed ? std::byte{0x40} : std::byte{0} };
-  constexpr UT     upper_7_bits{ static_cast<UT>(~(std::numeric_limits<UT>::max() >> 7)) };
-  bool              is_negative{ is_signed && to_int(*src_begin_it & sign_bit) != 0 };
-  UT v { to_int(*src_begin_it & ~(continuation_bit | sign_bit)) };
+  auto                   last_digit_it { src_begin_it };
+  constexpr bool         is_signed     { std::is_signed_v<T> };
+  constexpr std::uint8_t sign_bit      { is_signed ? 0x40u : 0x00u };
+  constexpr UT           upper_7_bits  { static_cast<UT>(~(std::numeric_limits<UT>::max() >> 7)) };
+  constexpr std::uint8_t payload_mask  { static_cast<std::uint8_t>(~(continuation_bit | sign_bit)) };
+  bool                   is_negative   { is_signed && to_uint(u8(*src_begin_it) & sign_bit) != 0 };
+  UT                     v             { to_uint(u8(*src_begin_it) & payload_mask) };
   while (src_begin_it != init_start_it) {
     if (v & upper_7_bits) {
       if (std::is_same_v<Throws, Throw>) {
@@ -266,14 +362,14 @@ constexpr T& decode_dint(std::byte const*& src_begin_it, std::byte const* const 
       }
     }
     v <<= 7;
-    v |= to_int(*--src_begin_it & ~continuation_bit);
+    v |= to_uint(u8(*--src_begin_it) & ~continuation_bit);
   }
 
   if (is_negative) {
     v = ~v;
   }
   ++(src_begin_it = last_digit_it);
-  memcpy(&v_dst, &v, sizeof(T));
+  v_dst = Constexpr::bit_cast<T>(v);
   return v_dst;
 }
 
@@ -300,8 +396,7 @@ constexpr T& decode_dint(std::byte const*& src_begin_it, std::byte const* const 
  */
 template <typename Throws, typename T
   , std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, bool> = true>
-constexpr T decode_dint(std::byte const*& src_begin_it, std::byte const* const src_end_it)
-{
+constexpr T decode_dint(std::byte const*& src_begin_it, std::byte const* const src_end_it) {
   T v_dst {};
   return decode_dint<Throws>(src_begin_it, src_end_it, v_dst);
 }

@@ -302,6 +302,40 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
   EXPECT_EQ(write_it, read_it);
 }
 
+TEST(DynamicIntCharStorage, RoundTripsPlainCharBytes)
+{
+  // Plain char storage should preserve the encoded byte sequence on this target.
+  char buffer[2]{};
+  char* const write_it{ encode_dint(buffer, buffer + 2, int16_t(-600)) };
+  ASSERT_EQ(buffer + 2, write_it);
+  EXPECT_EQ(0xd7u, static_cast<unsigned char>(buffer[0]));
+  EXPECT_EQ(0x44u, static_cast<unsigned char>(buffer[1]));
+
+  char const* read_it{ buffer };
+  char const* const end_it{ write_it };
+  int16_t value{};
+  decode_dint<Throw>(read_it, end_it, value);
+  EXPECT_EQ(int16_t(-600), value);
+  EXPECT_EQ(end_it, read_it);
+}
+
+TEST(DynamicIntCharStorage, RoundTripsSignedCharBytes)
+{
+  // Signed-char storage exercises the negative-byte read path explicitly.
+  signed char buffer[2]{};
+  signed char* const write_it{ encode_dint(buffer, buffer + 2, int16_t(-600)) };
+  ASSERT_EQ(buffer + 2, write_it);
+  EXPECT_EQ(0xd7u, static_cast<unsigned char>(buffer[0]));
+  EXPECT_EQ(0x44u, static_cast<unsigned char>(buffer[1]));
+
+  signed char const* read_it{ buffer };
+  signed char const* const end_it{ write_it };
+  int16_t value{};
+  decode_dint<Throw>(read_it, end_it, value);
+  EXPECT_EQ(int16_t(-600), value);
+  EXPECT_EQ(end_it, read_it);
+}
+
 TEST(DynamicIntDecode, ReturnsValueFromValueReturningOverload)
 {
   // The value-returning overload should decode and advance the iterator.
