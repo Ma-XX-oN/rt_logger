@@ -55,6 +55,8 @@ namespace Constexpr {
    * @param src_begin - Start of the source range.
    * @param src_end - One past the end of the source range.
    * @param dst_begin - Start of the destination range.
+   *
+   * @return DstIt - The new location of the \p dst_begin after copy.
    */
   template <typename SrcIt, typename DstIt>
   constexpr DstIt copy(SrcIt src_begin, SrcIt src_end, DstIt dst_begin) {
