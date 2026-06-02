@@ -1,4 +1,4 @@
-#include "constexpr/int_codex.hpp"
+#include "constexpr/int_codec.hpp"
 
 #include <gtest/gtest.h>
 
@@ -54,7 +54,7 @@ constexpr bool kConstexprFixedWidthRoundTripWorks{ []() constexpr {
   signed char const* read_it{ buffer };
   signed char const* const end_it{ write_it };
   int16_t value{};
-  decode_int(read_it, end_it, value);
+  decode_int(value, read_it, end_it);
   return write_it == buffer + 2
     && value == int16_t(-600)
     && read_it == end_it;
@@ -90,7 +90,7 @@ void expect_encoding(T value, std::initializer_list<std::byte> expected)
   // Finally decode the buffer and prove the iterator is fully consumed.
   std::byte const* read_it{ buffer };
   T decoded{};
-  decode_dint<Throw>(read_it, end_it, decoded);
+  decode_dint<Throw>(decoded, read_it, end_it);
   EXPECT_EQ(end_it, read_it);
   EXPECT_EQ(value, decoded);
 }
@@ -113,7 +113,7 @@ void expect_round_trip(T value)
   // Then decode it back and make sure no trailing bytes remain unread.
   std::byte const* read_it{ buffer };
   T decoded{};
-  decode_dint<Throw>(read_it, end_it, decoded);
+  decode_dint<Throw>(decoded, read_it, end_it);
   EXPECT_EQ(end_it, read_it);
   EXPECT_EQ(value, decoded);
 }
@@ -292,43 +292,43 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
   std::byte const* read_it{ buffer };
 
   // The first three values cover the one-byte cases.
-  decode_dint<Throw>(read_it, write_it, uint8_v);
+  decode_dint<Throw>(uint8_v, read_it, write_it);
   EXPECT_EQ(1, uint8_v);
 
-  decode_dint<Throw>(read_it, write_it, int8_v);
+  decode_dint<Throw>(int8_v, read_it, write_it);
   EXPECT_EQ(2, int8_v);
 
-  decode_dint<Throw>(read_it, write_it, int8_v);
+  decode_dint<Throw>(int8_v, read_it, write_it);
   EXPECT_EQ(-3, int8_v);
 
   // Then step through the 16-bit encodings.
-  decode_dint<Throw>(read_it, write_it, uint16_v);
+  decode_dint<Throw>(uint16_v, read_it, write_it);
   EXPECT_EQ(400, uint16_v);
 
-  decode_dint<Throw>(read_it, write_it, int16_v);
+  decode_dint<Throw>(int16_v, read_it, write_it);
   EXPECT_EQ(500, int16_v);
 
-  decode_dint<Throw>(read_it, write_it, int16_v);
+  decode_dint<Throw>(int16_v, read_it, write_it);
   EXPECT_EQ(-600, int16_v);
 
   // Then the 32-bit encodings.
-  decode_dint<Throw>(read_it, write_it, uint32_v);
+  decode_dint<Throw>(uint32_v, read_it, write_it);
   EXPECT_EQ(700u, uint32_v);
 
-  decode_dint<Throw>(read_it, write_it, int32_v);
+  decode_dint<Throw>(int32_v, read_it, write_it);
   EXPECT_EQ(800, int32_v);
 
-  decode_dint<Throw>(read_it, write_it, int32_v);
+  decode_dint<Throw>(int32_v, read_it, write_it);
   EXPECT_EQ(-900, int32_v);
 
   // Finish with the 64-bit encodings and confirm the stream is exhausted.
-  decode_dint<Throw>(read_it, write_it, uint64_v);
+  decode_dint<Throw>(uint64_v, read_it, write_it);
   EXPECT_EQ(1000u, uint64_v);
 
-  decode_dint<Throw>(read_it, write_it, int64_v);
+  decode_dint<Throw>(int64_v, read_it, write_it);
   EXPECT_EQ(1100, int64_v);
 
-  decode_dint<Throw>(read_it, write_it, int64_v);
+  decode_dint<Throw>(int64_v, read_it, write_it);
   EXPECT_EQ(-1200, int64_v);
   EXPECT_EQ(write_it, read_it);
 }
@@ -358,8 +358,8 @@ TEST(IntCodexFixedWidth, RoundTripsSequentialSignedAndUnsignedValues)
   signed char const* const end_it{ write_it };
   int16_t signed_value{};
   std::uint32_t unsigned_value{};
-  decode_int(read_it, end_it, signed_value);
-  decode_int(read_it, end_it, unsigned_value);
+  decode_int(signed_value, read_it, end_it);
+  decode_int(unsigned_value, read_it, end_it);
   EXPECT_EQ(int16_t(-600), signed_value);
   EXPECT_EQ(std::uint32_t{0x12345678u}, unsigned_value);
   EXPECT_EQ(end_it, read_it);
@@ -391,7 +391,7 @@ TEST(DynamicIntCharStorage, RoundTripsPlainCharBytes)
   char const* read_it{ buffer };
   char const* const end_it{ write_it };
   int16_t value{};
-  decode_dint<Throw>(read_it, end_it, value);
+  decode_dint<Throw>(value, read_it, end_it);
   EXPECT_EQ(int16_t(-600), value);
   EXPECT_EQ(end_it, read_it);
 }
@@ -408,7 +408,7 @@ TEST(DynamicIntCharStorage, RoundTripsSignedCharBytes)
   signed char const* read_it{ buffer };
   signed char const* const end_it{ write_it };
   int16_t value{};
-  decode_dint<Throw>(read_it, end_it, value);
+  decode_dint<Throw>(value, read_it, end_it);
   EXPECT_EQ(int16_t(-600), value);
   EXPECT_EQ(end_it, read_it);
 }
@@ -434,7 +434,7 @@ TEST(DynamicIntFailure, DecodeThrowsWhenSourceRangeIsEmpty)
   std::byte const* read_it{ buffer };
   uint8_t value{};
   EXPECT_THROW(
-    decode_dint<Throw>(read_it, buffer, value),
+    decode_dint<Throw>(value, read_it, buffer),
     std::overflow_error
   );
 }
@@ -445,7 +445,7 @@ TEST(DynamicIntNoThrow, DecodeLeavesIteratorWhenSourceRangeIsEmpty)
   std::byte const buffer[1]{};
   std::byte const* read_it{ buffer };
   uint8_t value{ 42 };
-  uint8_t& result{ decode_dint<NoThrow>(read_it, buffer, value) };
+  uint8_t& result{ decode_dint<NoThrow>(value, read_it, buffer) };
   EXPECT_EQ(&value, &result);
   EXPECT_EQ(buffer, read_it);
   EXPECT_EQ(uint8_t(42), value);
@@ -459,7 +459,7 @@ TEST(DynamicIntFailure, DecodeThrowsForUnterminatedValue)
   std::byte const* read_it{ buffer };
   uint8_t value{};
   EXPECT_THROW(
-    decode_dint<Throw>(read_it, buffer + 1, value),
+    decode_dint<Throw>(value, read_it, buffer + 1),
     std::overflow_error
   );
 }
@@ -471,7 +471,7 @@ TEST(DynamicIntNoThrow, DecodeResetsIteratorForUnterminatedValue)
 
   std::byte const* read_it{ buffer };
   uint8_t value{ 42 };
-  uint8_t& result{ decode_dint<NoThrow>(read_it, buffer + 1, value) };
+  uint8_t& result{ decode_dint<NoThrow>(value, read_it, buffer + 1) };
   EXPECT_EQ(&value, &result);
   EXPECT_EQ(buffer, read_it);
   EXPECT_EQ(uint8_t(42), value);
@@ -488,7 +488,7 @@ TEST(DynamicIntFailure, DecodeThrowsWhenValueDoesNotFitTargetType)
   std::byte const* read_it{ buffer };
   uint8_t value{};
   EXPECT_THROW(
-    decode_dint<Throw>(read_it, buffer + 2, value),
+    decode_dint<Throw>(value, read_it, buffer + 2),
     std::overflow_error
   );
 }
@@ -503,7 +503,7 @@ TEST(DynamicIntNoThrow, DecodeResetsIteratorWhenValueDoesNotFitTargetType)
 
   std::byte const* read_it{ buffer };
   uint8_t value{ 42 };
-  uint8_t& result{ decode_dint<NoThrow>(read_it, buffer + 2, value) };
+  uint8_t& result{ decode_dint<NoThrow>(value, read_it, buffer + 2) };
   EXPECT_EQ(&value, &result);
   EXPECT_EQ(buffer, read_it);
   EXPECT_EQ(uint8_t(42), value);

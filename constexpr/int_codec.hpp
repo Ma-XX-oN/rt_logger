@@ -1,5 +1,5 @@
 /**
- * @file int_codex.hpp
+ * @file int_codec.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Encodes/decodes integers into/from byte-like buffers using either a
  *   fixed-width little-endian representation or a variable-width dynamic
@@ -55,8 +55,8 @@
  * @copyright Copyright (c) 2026
  */
 
-#ifndef INT_CODEX_HPP
-#define INT_CODEX_HPP
+#ifndef INT_CODEC_HPP
+#define INT_CODEC_HPP
 
 #include <cstdint>
 #include <iterator>
@@ -123,16 +123,16 @@ constexpr std::uint8_t u8(std::byte value) {
  * @return ItB - Iterator one past the last byte written.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
+constexpr ItB encode_int(ItB dst_begin_it, ItE dst_end_it, T value) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
     !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
-    "Signed int_codex types require two's-complement representation"
+    "Signed int_codec types require two's-complement representation"
   );
   static_assert(
     std::numeric_limits<unsigned char>::digits == 8,
-    "int_codex requires 8-bit byte storage"
+    "int_codec requires 8-bit byte storage"
   );
 
   static_assert(Constexpr::is_bidirectional<ItB>, "dst_begin_it must be a bidirectional iterator");
@@ -170,23 +170,23 @@ constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
  * @tparam T - Integral type to decode.
  * @tparam ItB - Iterator type pointing at readable byte-like storage.
  * @tparam ItE - Sentinel type delimiting the readable range.
+ * @param v_dst - Storage for the decoded value.
  * @param src_begin_it - Start of the source bytes. Updated past the decoded
  *   value.
  * @param src_end_it - One past the end of the source bytes.
- * @param v_dst - Storage for the decoded value.
  * @return T& - \p v_dst.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr T& decode_int(ItB& src_begin_it, ItE src_end_it, T& v_dst) {
+constexpr T& decode_int(T& v_dst, ItB& src_begin_it, ItE src_end_it) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
     !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
-    "Signed int_codex types require two's-complement representation"
+    "Signed int_codec types require two's-complement representation"
   );
   static_assert(
     std::numeric_limits<unsigned char>::digits == 8,
-    "int_codex requires 8-bit byte storage"
+    "int_codec requires 8-bit byte storage"
   );
 
   static_assert(Constexpr::is_bidirectional<ItB>, "src_begin_it must be a bidirectional iterator");
@@ -229,7 +229,7 @@ template <typename T, typename ItB, typename ItE
   , std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, bool> = true>
 constexpr T decode_int(ItB& src_begin_it, ItE src_end_it) {
   T v_dst{};
-  return decode_int(src_begin_it, src_end_it, v_dst);
+  return decode_int(v_dst, src_begin_it, src_end_it);
 }
 
 /**
@@ -404,10 +404,10 @@ constexpr auto encode_dint() {
  * @tparam Throws \c Throw to throw on decode errors, or \c NoThrow to leave
  *   \p v_dst unchanged and restore \p src_begin_it on failure.
  * @tparam T Decoded integral type.
+ * @param v_dst Storage for the decoded integer.
  * @param src_begin_it Reference to the first unread source byte. Updated to the
  *   next unread byte on success.
  * @param src_end_it One-past-the-end of the source range.
- * @param v_dst Storage for the decoded integer.
  *
  * @return \p v_dst.
  *
@@ -417,7 +417,7 @@ constexpr auto encode_dint() {
  *   - The decoded value requires more bits than fit in \p T.
  */
 template <typename Throws, typename T, typename ItB, typename ItE>
-constexpr T& decode_dint(ItB& src_begin_it, ItE src_end_it, T& v_dst) {
+constexpr T& decode_dint(T& v_dst, ItB& src_begin_it, ItE src_end_it) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
@@ -525,9 +525,9 @@ template <typename Throws, typename T
   , std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, bool> = true>
 constexpr T decode_dint(std::byte const*& src_begin_it, std::byte const* const src_end_it) {
   T v_dst {};
-  return decode_dint<Throws>(src_begin_it, src_end_it, v_dst);
+  return decode_dint<Throws>(v_dst, src_begin_it, src_end_it);
 }
 
 } // namespace Constexpr
 
-#endif // INT_CODEX_HPP
+#endif // INT_CODEC_HPP
