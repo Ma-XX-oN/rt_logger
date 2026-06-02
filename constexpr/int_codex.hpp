@@ -1,8 +1,9 @@
 /**
- * @file dynamic_int.hpp
+ * @file int_codex.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
- * @brief Encodes/decodes integers into/from a byte-like buffer in/from a 7 bit
- *   dynamic representation from/to a machine readable 8 bit representation.
+ * @brief Encodes/decodes integers into/from byte-like buffers using either a
+ *   fixed-width little-endian representation or a variable-width dynamic
+ *   representation.
  * @version 0.1
  * @date 2026-05-21
  *
@@ -54,8 +55,8 @@
  * @copyright Copyright (c) 2026
  */
 
-#ifndef DYNAMIC_INT_HPP
-#define DYNAMIC_INT_HPP
+#ifndef INT_CODEX_HPP
+#define INT_CODEX_HPP
 
 #include <cstdint>
 #include <iterator>
@@ -65,7 +66,6 @@
 #include <stdexcept>
 #include <cassert>
 #include <array>
-#include <cstring>
 #include <limits>
 #include "ThrowNoThrow.hpp"
 #include "bit.hpp"
@@ -105,6 +105,129 @@ constexpr std::uint8_t u8(B value) {
 template <>
 constexpr std::uint8_t u8(std::byte value) {
   return std::to_integer<std::uint8_t>(value);
+}
+
+/**
+ * @brief Encodes \p value into the byte range [`dst_begin_it`, `dst_end_it`)
+ *   using a fixed-width little-endian layout.
+ *
+ * The caller must provide enough space to store the encoded value. This
+ * function asserts if the destination range is too small.
+ *
+ * @tparam T - Integral type to encode.
+ * @tparam ItB - Iterator type pointing at writable byte-like storage.
+ * @tparam ItE - Sentinel type delimiting the writable range.
+ * @param dst_begin_it - First destination byte to write.
+ * @param dst_end_it - One-past-the-end of the destination range.
+ * @param value - Value to encode.
+ * @return ItB - Iterator one past the last byte written.
+ */
+template <typename T, typename ItB, typename ItE>
+constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
+  static_assert(std::is_integral_v<T>, "T must be an integral type");
+  static_assert(!std::is_same_v<T, bool>, "T must not be bool");
+  static_assert(
+    !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
+    "Signed int_codex types require two's-complement representation"
+  );
+  static_assert(
+    std::numeric_limits<unsigned char>::digits == 8,
+    "int_codex requires 8-bit byte storage"
+  );
+
+  static_assert(Constexpr::is_bidirectional<ItB>, "dst_begin_it must be a bidirectional iterator");
+  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "dst_end_it must be a sentinel for dst_begin_it");
+
+  using ItVT = typename std::iterator_traits<ItB>::value_type;
+  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
+
+  using Ref = decltype(*std::declval<ItB&>());
+  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
+  static_assert(std::is_assignable_v<Ref, ItVT>, "Iterator must be writable");
+
+  using UT = std::make_unsigned_t<T>;
+  UT uvalue{ static_cast<UT>(value) };
+  auto to_itv = [] (std::uint8_t v) { return static_cast<ItVT>(v); };
+
+  for (std::size_t i{ 0 }; i < sizeof(T); ++i) {
+    assert(dst_begin_it != dst_end_it || !"Not enough space to store in buffer");
+    *dst_begin_it++ = to_itv(u8(uvalue & UT{0xff}));
+    uvalue >>= 8;
+  }
+  return dst_begin_it;
+}
+
+/**
+ * @brief Decodes a fixed-width little-endian integer from the byte range
+ *   [`src_begin_it`, `src_end_it`) and stores it in \p v_dst.
+ *
+ * On success, \p src_begin_it is advanced past the decoded bytes.
+ *
+ * The caller must provide enough remaining bytes to decode \p T. This function
+ * asserts if the source range is too small.
+ *
+ * @tparam T - Integral type to decode.
+ * @tparam ItB - Iterator type pointing at readable byte-like storage.
+ * @tparam ItE - Sentinel type delimiting the readable range.
+ * @param src_begin_it - Start of the source bytes. Updated past the decoded
+ *   value.
+ * @param src_end_it - One past the end of the source bytes.
+ * @param v_dst - Storage for the decoded value.
+ * @return T& - \p v_dst.
+ */
+template <typename T, typename ItB, typename ItE>
+constexpr T& decode_int(ItB& src_begin_it, ItE src_end_it, T& v_dst) {
+  static_assert(std::is_integral_v<T>, "T must be an integral type");
+  static_assert(!std::is_same_v<T, bool>, "T must not be bool");
+  static_assert(
+    !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
+    "Signed int_codex types require two's-complement representation"
+  );
+  static_assert(
+    std::numeric_limits<unsigned char>::digits == 8,
+    "int_codex requires 8-bit byte storage"
+  );
+
+  static_assert(Constexpr::is_bidirectional<ItB>, "src_begin_it must be a bidirectional iterator");
+  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "src_end_it must be a sentinel for src_begin_it");
+
+  using ItVT = typename std::iterator_traits<ItB>::value_type;
+  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
+
+  using Ref = decltype(*std::declval<ItB&>());
+  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
+
+  using UT = std::make_unsigned_t<T>;
+  UT value{};
+
+  for (std::size_t i{ 0 }; i < sizeof(T); ++i) {
+    assert(src_begin_it != src_end_it || !"Not enough bytes left to decode value");
+    value |= static_cast<UT>(u8(*src_begin_it++)) << (i * 8);
+  }
+
+  v_dst = Constexpr::bit_cast<T>(value);
+  return v_dst;
+}
+
+/**
+ * @brief Decodes a fixed-width little-endian integer from the byte range
+ *   [`src_begin_it`, `src_end_it`) and returns it by value.
+ *
+ * On success, \p src_begin_it is advanced past the decoded bytes.
+ *
+ * @tparam T - Integral type to decode.
+ * @tparam ItB - Iterator type pointing at readable byte-like storage.
+ * @tparam ItE - Sentinel type delimiting the readable range.
+ * @param src_begin_it - Start of the source bytes. Updated past the decoded
+ *   value.
+ * @param src_end_it - One past the end of the source bytes.
+ * @return T - Decoded value.
+ */
+template <typename T, typename ItB, typename ItE
+  , std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, bool> = true>
+constexpr T decode_int(ItB& src_begin_it, ItE src_end_it) {
+  T v_dst{};
+  return decode_int(src_begin_it, src_end_it, v_dst);
 }
 
 /**
@@ -405,4 +528,4 @@ constexpr T decode_dint(std::byte const*& src_begin_it, std::byte const* const s
 
 } // namespace Constexpr
 
-#endif // DYNAMIC_INT_HPP
+#endif // INT_CODEX_HPP
