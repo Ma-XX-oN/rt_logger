@@ -8,6 +8,9 @@
 #include <limits>
 #include <stdexcept>
 
+using Constexpr::decode_dint;
+using Constexpr::encode_dint;
+
 namespace {
 
 // Compile-time coverage

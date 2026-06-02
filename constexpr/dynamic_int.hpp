@@ -70,6 +70,8 @@
 #include "ThrowNoThrow.hpp"
 #include "bit.hpp"
 
+namespace Constexpr {
+
 /**
  * @brief Tests that type \p T is a byte in size.
  * 
@@ -400,5 +402,7 @@ constexpr T decode_dint(std::byte const*& src_begin_it, std::byte const* const s
   T v_dst {};
   return decode_dint<Throws>(src_begin_it, src_end_it, v_dst);
 }
+
+} // namespace Constexpr
 
 #endif // DYNAMIC_INT_HPP
