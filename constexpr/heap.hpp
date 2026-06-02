@@ -41,19 +41,19 @@ namespace Constexpr {
       *
       * @param str_to_register - String to register in memory.
       * @return std::size_t - Returns the begin_id that can be used with
-      *   get_string().
+      *   get_string().  Value will never be 0.
       */
     constexpr std::size_t add_string(std::string_view str_to_register) {
       auto length { memory.length() };
       memory.append(str_to_register);
       memory.push_back('\0');
-      return length;
+      return length+1;
     }
 
     /**
       * @brief Get the end id for the string just registered before.
       * 
-      * @return std::size_t - end id
+      * @return std::size_t - End id.
       */
     constexpr std::size_t end_id() const {
       auto length{ memory.size() };
@@ -73,20 +73,22 @@ namespace Constexpr {
       * @return std::string_view - View of the stored string.
       */
     constexpr std::string_view get_string(std::size_t begin_id) const {
-      assert(begin_id <= memory.size());
-      return std::string_view(memory.begin() + begin_id);
+      assert(begin_id);
+      assert(begin_id < memory.size());
+      return std::string_view(memory.begin() + begin_id - 1);
     }
 
     /**
-      * @brief Get a string view over an explicit subrange of the backing store.
+      * @brief Get a string view over an explicit stored range.
       *
-      * @param begin_id - First character index in the backing store.
-      * @param end_id - One-past-the-end character index in the backing store.
+      * @param begin_id - Begin id for the requested range.
+      * @param end_id - End id for the requested range.
       * @return std::string_view - View spanning the requested range.
       */
     constexpr std::string_view get_string(std::size_t begin_id, std::size_t end_id) const {
-      assert(begin_id <= end_id && end_id <= memory.size());
-      return std::string_view(memory.begin() + begin_id, end_id - begin_id);
+      assert(begin_id);
+      assert(begin_id < end_id && end_id <= memory.size());
+      return std::string_view(memory.begin() + begin_id - 1, end_id - begin_id);
     }
   };
   
@@ -111,12 +113,13 @@ namespace Constexpr {
       *
       * @tparam T - Type assignable into \p Variant.
       * @param item - Item to store.
-      * @return std::size_t - Id that can later be used with get_item().
+      * @return std::size_t - Id that can later be used with get_item().  Value
+      *   will never be 0.
       */
     template <typename T>
     constexpr std::size_t add_item(T item) {
       memory.at(next_id) = item;
-      return next_id++;
+      return ++next_id;
     }
 
     /**
@@ -126,7 +129,8 @@ namespace Constexpr {
       * @return auto& - Reference to the stored item slot.
       */
     constexpr auto& get_item(std::size_t id) {
-      return memory.at(id);
+      assert(id);
+      return memory.at(id-1);
     }
 
     /**
@@ -136,7 +140,8 @@ namespace Constexpr {
       * @return auto& - Reference to the stored item slot.
       */
     constexpr auto& get_item(std::size_t id) const {
-      return memory.at(id);
+      assert(id);
+      return memory.at(id-1);
     }
   };
 
