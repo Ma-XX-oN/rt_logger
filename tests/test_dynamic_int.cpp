@@ -1,4 +1,4 @@
-#include "constexpr/dynamic_int.hpp"
+#include "constexpr/int_codex.hpp"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,9 @@
 #include <stdexcept>
 
 using Constexpr::decode_dint;
+using Constexpr::decode_int;
 using Constexpr::encode_dint;
+using Constexpr::encode_int;
 
 namespace {
 
@@ -32,6 +34,32 @@ constexpr bool kConstexprEncodedTemplateWorks{ []() constexpr {
     && encoded[1] == std::byte{0x44};
 }() };
 static_assert(kConstexprEncodedTemplateWorks);
+
+constexpr bool kConstexprFixedWidthEncodeWorks{ []() constexpr {
+  // A fixed-width integer should emit little-endian bytes into byte-like storage.
+  std::byte buffer[4]{};
+  std::byte* const end_it{ encode_int(buffer, buffer + 4, std::uint32_t{0x12345678u}) };
+  return end_it == buffer + 4
+    && buffer[0] == std::byte{0x78}
+    && buffer[1] == std::byte{0x56}
+    && buffer[2] == std::byte{0x34}
+    && buffer[3] == std::byte{0x12};
+}() };
+static_assert(kConstexprFixedWidthEncodeWorks);
+
+constexpr bool kConstexprFixedWidthRoundTripWorks{ []() constexpr {
+  // Signed fixed-width values should round-trip through signed-char iterators.
+  signed char buffer[2]{};
+  signed char* const write_it{ encode_int(buffer, buffer + 2, int16_t(-600)) };
+  signed char const* read_it{ buffer };
+  signed char const* const end_it{ write_it };
+  int16_t value{};
+  decode_int(read_it, end_it, value);
+  return write_it == buffer + 2
+    && value == int16_t(-600)
+    && read_it == end_it;
+}() };
+static_assert(kConstexprFixedWidthRoundTripWorks);
 
 // Runtime helper assertions
 /**
@@ -303,6 +331,52 @@ TEST(DynamicIntStream, EncodesAndDecodesSequentialValues)
   decode_dint<Throw>(read_it, write_it, int64_v);
   EXPECT_EQ(-1200, int64_v);
   EXPECT_EQ(write_it, read_it);
+}
+
+TEST(IntCodexFixedWidth, EncodesKnownLittleEndianBytes)
+{
+  // Fixed-width encoding should work with std::byte iterators too.
+  std::byte buffer[4]{};
+  std::byte* const end_it{ encode_int(buffer, buffer + 4, std::uint32_t{0x12345678u}) };
+  ASSERT_EQ(buffer + 4, end_it);
+  EXPECT_EQ(std::byte{0x78}, buffer[0]);
+  EXPECT_EQ(std::byte{0x56}, buffer[1]);
+  EXPECT_EQ(std::byte{0x34}, buffer[2]);
+  EXPECT_EQ(std::byte{0x12}, buffer[3]);
+}
+
+TEST(IntCodexFixedWidth, RoundTripsSequentialSignedAndUnsignedValues)
+{
+  // Mixed fixed-width values should round-trip through signed-char iterators.
+  signed char buffer[6]{};
+  signed char* write_it{ buffer };
+  write_it = encode_int(write_it, buffer + 6, int16_t(-600));
+  write_it = encode_int(write_it, buffer + 6, std::uint32_t{0x12345678u});
+  ASSERT_EQ(buffer + 6, write_it);
+
+  signed char const* read_it{ buffer };
+  signed char const* const end_it{ write_it };
+  int16_t signed_value{};
+  std::uint32_t unsigned_value{};
+  decode_int(read_it, end_it, signed_value);
+  decode_int(read_it, end_it, unsigned_value);
+  EXPECT_EQ(int16_t(-600), signed_value);
+  EXPECT_EQ(std::uint32_t{0x12345678u}, unsigned_value);
+  EXPECT_EQ(end_it, read_it);
+}
+
+TEST(IntCodexFixedWidth, ReturnsValueFromValueReturningOverload)
+{
+  // The convenience overload should still decode and advance byte iterators.
+  std::byte const buffer[2]{
+    std::byte{0xa8},
+    std::byte{0xfd}
+  };
+
+  std::byte const* read_it{ buffer };
+  int16_t const value{ decode_int<int16_t>(read_it, buffer + 2) };
+  EXPECT_EQ(int16_t(-600), value);
+  EXPECT_EQ(buffer + 2, read_it);
 }
 
 TEST(DynamicIntCharStorage, RoundTripsPlainCharBytes)

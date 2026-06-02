@@ -144,6 +144,7 @@ constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
   using Ref = decltype(*std::declval<ItB&>());
   static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
   static_assert(std::is_assignable_v<Ref, ItVT>, "Iterator must be writable");
+  //////////////////////////////////////////////////////////////////////////////////////////////////
 
   using UT = std::make_unsigned_t<T>;
   UT uvalue{ static_cast<UT>(value) };
@@ -196,6 +197,7 @@ constexpr T& decode_int(ItB& src_begin_it, ItE src_end_it, T& v_dst) {
 
   using Ref = decltype(*std::declval<ItB&>());
   static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
+  //////////////////////////////////////////////////////////////////////////////////////////////////
 
   using UT = std::make_unsigned_t<T>;
   UT value{};
