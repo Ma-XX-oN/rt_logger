@@ -123,7 +123,7 @@ constexpr std::uint8_t u8(std::byte value) {
  * @return ItB - Iterator one past the last byte written.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr ItB encode_int(ItB dst_begin_it, ItE dst_end_it, T value) {
+constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
