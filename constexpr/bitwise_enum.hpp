@@ -113,4 +113,4 @@ constexpr E operator~(E rhs) {
   return static_cast<E>(~static_cast<I>(rhs));
 }
 
-#endif BITWISE_ENUM_HPP
+#endif // BITWISE_ENUM_HPP
