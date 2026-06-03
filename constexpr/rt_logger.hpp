@@ -24,7 +24,7 @@
 #include <stdexcept>
 #include <tuple>
 #include "machine_num.hpp"
-#include "dynamic_int.hpp"
+#include "int_codec.hpp"
 #include "bitwise_enum.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
