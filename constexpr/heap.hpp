@@ -99,6 +99,21 @@ namespace Constexpr {
     *
     * Objects never get deleted.
     *
+    * TODO: If delete/reuse is needed later, add a separate ItemsDeletable
+    *       type rather than changing Items semantics.
+    *
+    *       - Items remains an append-only slot store with stable ids.
+    *       - ItemsDeletable can use an Items internally plus a free-id list.
+    *       - delete_item(): record the freed slot id for later reuse.
+    *       - add_item(): reuse a freed slot if one is available; otherwise call
+    *         Items::add_item() to claim the next fresh slot.
+    *       - If id reuse is allowed, consider a generation counter or debug
+    *         handle validation so stale ids can be detected.
+    *
+    * TODO: If useful, factor out a small constexpr LIFO helper for internal
+    *       free-id management and reuse it here. Items itself still models slot
+    *       storage, not stack semantics.
+    *
     * @tparam N - Maximum number of objects that can be stored.
     * @tparam Variant - Common storage type used for every stored object.
     */
@@ -129,19 +144,43 @@ namespace Constexpr {
       * @return auto& - Reference to the stored item slot.
       */
     constexpr auto& get_item(std::size_t id) {
-      assert(id);
+      assert(id && id <= next_id || !"Out of bounds");
       return memory.at(id-1);
     }
 
     /**
-      * @brief Access a previously stored item by id.
+      * @brief Access a previously stored item as const by id.
       *
       * @param id - Id returned by add_item().
       * @return auto& - Reference to the stored item slot.
       */
     constexpr auto& get_item(std::size_t id) const {
-      assert(id);
+      assert(id && id <= next_id || !"Out of bounds");
       return memory.at(id-1);
+    }
+
+    /**
+      * @brief Access a previously stored item as Item type by id.
+      *
+      * @param id - Id returned by add_item().
+      * @return auto& - Reference to the stored item slot.
+      */
+    template <typename Item>
+    constexpr auto& get_item(std::size_t id) {
+      assert(id && id <= next_id || !"Out of bounds");
+      return std::get<Item>(memory.at(id-1));
+    }
+
+    /**
+      * @brief Access a previously stored item as const Item type by id.
+      *
+      * @param id - Id returned by add_item().
+      * @return auto& - Reference to the stored item slot.
+      */
+    template <typename Item>
+    constexpr auto& get_item(std::size_t id) const {
+      assert(id && id <= next_id || !"Out of bounds");
+      return std::get<Item>(memory.at(id-1));
     }
   };
 
