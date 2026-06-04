@@ -13,11 +13,12 @@ using TestPairs = Constexpr::impl::Pairs<TestEnum>;
 using TestNamed = Constexpr::impl::Named<TestEnum>;
 using TestNumeric = Constexpr::impl::Numeric<TestEnum>;
 using TestConditional = Constexpr::impl::Conditional<TestEnum>;
+using TestGlobal = Constexpr::impl::Global<TestEnum>;
 using TestGroup = Constexpr::impl::Group<TestEnum>;
 using TestCmds = Constexpr::impl::Cmds<TestEnum>;
 using TestGroupEncodingForm = Constexpr::impl::eGroupEncodingForm;
 using TestConditionalEncodingPlan = Constexpr::impl::ConditionalEncodingPlan;
-using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGroup, TestCmds>;
+using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGlobal, TestGroup, TestCmds>;
 using TestSettings = Constexpr::impl::EnumSettings<TestEnum, 128, 32, TestItemVariant>;
 using TestEnumDef = Constexpr::impl::Enum<TestSettings>;
 using TestEncoder = Constexpr::impl::EnumEncoder<TestEnumDef>;
@@ -78,6 +79,17 @@ constexpr TestItemId add_numeric(TestEnumDef& enum_def, TestEnum mask, char cons
  */
 constexpr TestItemId add_cmd(TestEnumDef& enum_def, TestItemId command_id, TestItemId next_id = 0) {
   return enum_def.add_item(TestCmds{ command_id, next_id });
+}
+
+/**
+ * @brief Stores one global node referencing a command list.
+ *
+ * @param enum_def - Test enum definition storage.
+ * @param cmds_id - Referenced command-list id.
+ * @return TestItemId - Stored global id.
+ */
+constexpr TestItemId add_global(TestEnumDef& enum_def, TestItemId cmds_id) {
+  return enum_def.add_item(TestGlobal{ cmds_id });
 }
 
 /**
@@ -422,6 +434,28 @@ TEST(EnumSpecEncoding, EmitsContinueScopeWhenNamedPairsOverflowBlockBudget)
   EXPECT_EQ(
     static_cast<unsigned char>(program[49]),
     static_cast<unsigned char>(eEnumCommand::ContinueScope));
+}
+
+TEST(EnumSpecEncoding, GlobalEncodesRootCommandList)
+{
+  // A stored global list should provide the root encode entry point for commands.
+  TestEnumDef enum_def{};
+  TestItemId const pair_id{ add_pair(enum_def, 0x01u, "one") };
+  TestItemId const named_id{ add_named(enum_def, pair_id) };
+  TestItemId const cmds_id{ add_cmd(enum_def, named_id) };
+  TestItemId const global_id{ add_global(enum_def, cmds_id) };
+
+  TestProgram program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  TestEncoder encoder{ enum_def, writer };
+
+  enum_def.item<TestGlobal>(global_id).encode(encoder);
+  writer.finish(program);
+
+  EXPECT_EQ(program.size(), 6u);
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[0]),
+    static_cast<unsigned char>(eEnumCommand::Named));
 }
 
 } // namespace

@@ -472,7 +472,6 @@ namespace Constexpr {
       If             = 0b0'0'001'00, // Laying down pairs/commands for If block
       Else           = 0b0'0'010'00, // Laying down pairs/commands for Else block
       Continue       = 0b0'0'011'00, // Laying down pairs/commands for Cont block
-      Global         = 0b0'0'100'00, // Laying down       commands for Global block
 
       mCmd           = 0b0'1'000'00, // Set means list of commands, otherwise list of pairs
 
@@ -773,10 +772,6 @@ namespace Constexpr {
       EnumEncoder<EnumT>& ec, eBlockType block_type, FnEncodeBlock fn_encode_block)
     {
       program_cursor_t pc { ec.program_cursor() };
-      if (block_type == eBlockType::Global) {
-        fn_encode_block(ec);
-        return pc;
-      }
 
       ec.encode_int(eEnumCommand::Terminate); // Add a placeholder opcode byte.
 
@@ -891,6 +886,26 @@ namespace Constexpr {
 
     template <typename E>
     struct Cmds;
+
+    template <typename E>
+    struct Global {
+      item_id_t cmds_id{}; // Type: Cmds<E>
+
+      /**
+       * @brief Encodes the root command list.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+        if (!cmds_id) {
+          return;
+        }
+
+        ec.template item<Cmds<E>>(cmds_id).encode(ec);
+      }
+    };
 
     enum class eGroupEncodingForm : std::uint8_t {
       None,
