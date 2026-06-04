@@ -33,6 +33,7 @@ function(dint_apply_common_warnings target_name)
         -Wall
         -Wextra
         -Wpedantic
+        -Werror
     )
   endif()
 endfunction()
@@ -104,6 +105,7 @@ if(DINT_BUILD_TESTS)
     tests/test_constexpr_string_view.cpp
     tests/test_constexpr_string.cpp
     tests/test_masked_bits.cpp
+    tests/test_enum_spec.cpp
   )
 
   add_executable(logger_tests
@@ -120,8 +122,44 @@ if(DINT_BUILD_TESTS)
   dint_copy_runtime_dlls(logger_tests)
   dint_enable_ubsan(logger_tests)
 
+  add_executable(bit_tests
+    tests/test_bit.cpp
+  )
+
+  target_link_libraries(bit_tests
+    PRIVATE
+      dynamic_int
+      GTest::gtest_main
+  )
+
+  dint_apply_common_warnings(bit_tests)
+  dint_copy_runtime_dlls(bit_tests)
+  dint_enable_ubsan(bit_tests)
+
+  add_executable(bit_fallback_tests
+    tests/test_bit.cpp
+  )
+
+  target_compile_definitions(bit_fallback_tests
+    PRIVATE
+      CONSTEXPR_DISABLE_STD_BIT_CAST
+      CONSTEXPR_DISABLE_BUILTIN_BIT_CAST
+  )
+
+  target_link_libraries(bit_fallback_tests
+    PRIVATE
+      dynamic_int
+      GTest::gtest_main
+  )
+
+  dint_apply_common_warnings(bit_fallback_tests)
+  dint_copy_runtime_dlls(bit_fallback_tests)
+  dint_enable_ubsan(bit_fallback_tests)
+
   include(GoogleTest)
   # Register each GoogleTest case with CTest so they can be listed and filtered
   # individually even though they live in one binary.
+  gtest_discover_tests(bit_tests)
+  gtest_discover_tests(bit_fallback_tests TEST_PREFIX "Fallback.")
   gtest_discover_tests(logger_tests)
 endif()
