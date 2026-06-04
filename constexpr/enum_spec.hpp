@@ -185,18 +185,16 @@ namespace Constexpr {
     using string_id_t = std::uint16_t;
 
     /**
-     * @brief Puts all Stream settings into one object to reduce clutter and noise in code.
+     * @brief Collect immutable enum-representation settings in one place.
      *
-     * @tparam E - Enum type
-     * @tparam MAX_STREAM_LEN_ - Maximum number of bytes for a stream.
-     * @tparam MAX_STRING_STORAGE_ - Maximum number of byte for string storage.
-     * @tparam MAX_ITEMS_STORAGE_ - Maximum number of items to store.
-     * @tparam Variant - std::variant of all items to store.
+     * @tparam E - Enum or integer value type stored by the representation.
+     * @tparam MAX_STRING_STORAGE_ - Maximum number of bytes for the shared string store.
+     * @tparam MAX_ITEMS_STORAGE_ - Maximum number of stored graph items.
+     * @tparam Variant - Variant type used to store every graph item.
      */
-    template <typename E, size_t MAX_STREAM_LEN_, size_t MAX_STRING_STORAGE_, size_t MAX_ITEMS_STORAGE_, typename Variant>
-    struct EncodingContextSettings {
-      using Enum = E;
-      constexpr static size_t MAX_STREAM_LEN     { MAX_STREAM_LEN_ };
+    template <typename E, size_t MAX_STRING_STORAGE_, size_t MAX_ITEMS_STORAGE_, typename Variant>
+    struct EnumSettings {
+      using Value = E;
       constexpr static size_t MAX_STRING_STORAGE { MAX_STRING_STORAGE_ };
       constexpr static size_t MAX_ITEMS_STORAGE  { MAX_ITEMS_STORAGE_ };
       using ItemVariant = Variant;
@@ -204,34 +202,21 @@ namespace Constexpr {
 
     using program_cursor_t = char*;
 
+    /**
+     * @brief Immutable enum-definition storage plus builder-time mutation helpers.
+     *
+     * @tparam Settings - Representation settings.
+     */
     template <typename Settings>
-    class EncodingContext {
-
-      /// Stream being built
-      string<Settings::MAX_STREAM_LEN+1> program{ Settings::MAX_STREAM_LEN };
-      /// Where the current end of the stream is
-      program_cursor_t program_end{ program.begin() };
-      
-      /// String storage
-      Strings<Settings::MAX_STRING_STORAGE> strings{};
-      
-      /// Item storage
+    class Enum {
       using Variant = typename Settings::ItemVariant;
+
+      Strings<Settings::MAX_STRING_STORAGE> strings{};
       Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
-      
-      // Are ints to be stored compressed?
-      bool compress{};
 
     public:
-
-     /**
-      * @brief Returns a pointer to the next byte to be written in the program buffer.
-      *
-      * @return program_cursor_t - Current write position in the program buffer.
-      */
-      constexpr program_cursor_t program_cursor() {
-        return program_end;
-      }
+      using value_type = typename Settings::Value;
+      using item_variant = Variant;
 
       /**
        * @brief Registers a string in the backing string store.
@@ -256,65 +241,215 @@ namespace Constexpr {
       }
 
       /**
-       * @brief Encodes the string into the stream.
-       * 
+       * @brief Retrieves a stored string view by id.
+       *
        * @param id - String id.
+       * @return std::string_view - View of the stored string.
        */
-      constexpr void encode_string(string_id_t id) {
-        std::string_view s { strings.get_string(id) };
-        // +1 is valid for Constexpr::string template.  Allows copying the implicit NUL character.
-        program_end = copy(s.begin(), s.end()+1, program_end);
+      constexpr std::string_view get_string(string_id_t id) const {
+        return strings.get_string(id);
       }
 
       /**
-       * @brief Encodes a value in the stream, compressed as a condensed dnum if
-       *   compress set, otherwise full width.
+       * @brief Retrieves a stored item variant by id.
        *
-       * @tparam T - Type of value.
-       * @param value - Value to encode.
-       * @param scope_bitmask - Bitmask to constrain and condense value.
-       */
-      template <typename T>
-      constexpr void encode_int(T value, T scope_bitmask) {
-        assert((value & scope_bitmask) == value || !"value must be a subset of scope_bitmask");
-        if (compress) {
-          assert(sizeof(T) > 1 || !"Can't compress a type that has a byte length of 1.");
-          auto mask { make_unsigned_equivalent(scope_bitmask) };
-          auto cvalue { condense(mask, make_unsigned_equivalent(value), true) };
-          program_end = Constexpr::encode_dint(program_end, program.end(), cvalue);
-        } else {
-          program_end = Constexpr::encode_int(program_end, program.end(), value);
-        }
-      }
-
-      /**
-       * @brief Encodes eEnumCommand in the program.
-       *
-       * @param value - Value to encode.
-       */
-      constexpr void encode_int(eEnumCommand cmd) {
-        program_end = Constexpr::encode_int(program_end, program.end(), cmd);
-      }
-
-      /**
-       * @brief Gets an item who's type hasn't yet been resolved from storage.
-       *
-       * @param item_id - Id to reference requested item.
-       * @return Variant& - Item retrieved.
+       * @param item_id - Item id.
+       * @return Variant& - Reference to the stored item variant.
        */
       constexpr Variant& item(item_id_t item_id) {
         return items.get_item(item_id);
       }
 
       /**
-       * @brief Gets an item as a specific type from storage.
-       * 
-       * @param item_id - Id to reference requested item.
-       * @return Item& - Item retrieved.
+       * @brief Retrieves a stored item variant by id as const.
+       *
+       * @param item_id - Item id.
+       * @return Variant const& - Reference to the stored item variant.
+       */
+      constexpr Variant const& item(item_id_t item_id) const {
+        return items.get_item(item_id);
+      }
+
+      /**
+       * @brief Retrieves a stored item as a specific type.
+       *
+       * @tparam Item - Requested stored item type.
+       * @param item_id - Item id.
+       * @return Item& - Reference to the stored item.
        */
       template <typename Item>
       constexpr Item& item(item_id_t item_id) {
         return items.template get_item<Item>(item_id);
+      }
+
+      /**
+       * @brief Retrieves a stored item as a specific type with const access.
+       *
+       * @tparam Item - Requested stored item type.
+       * @param item_id - Item id.
+       * @return Item const& - Reference to the stored item.
+       */
+      template <typename Item>
+      constexpr Item const& item(item_id_t item_id) const {
+        return items.template get_item<Item>(item_id);
+      }
+    };
+
+    /**
+     * @brief Non-owning byte sink for building a definition stream.
+     */
+    class ProgramWriter {
+      program_cursor_t m_begin{};
+      program_cursor_t m_end{};
+      program_cursor_t m_cursor{};
+
+    public:
+      /**
+       * @brief Constructs an empty writer.
+       */
+      constexpr ProgramWriter() noexcept = default;
+
+      /**
+       * @brief Constructs a writer over an explicit writable byte range.
+       *
+       * @param begin - First writable byte.
+       * @param end - One-past-the-end of the writable range.
+       */
+      constexpr ProgramWriter(program_cursor_t begin, program_cursor_t end) noexcept
+      : m_begin{ begin }
+      , m_end{ end }
+      , m_cursor{ begin }
+      {
+      }
+
+      /**
+       * @brief Constructs a writer over a fixed-capacity constexpr string.
+       *
+       * The target string is expanded to its logical character capacity first
+       * so the writer can use the full raw storage without a later resize
+       * clobbering already-written bytes.
+       *
+       * @tparam N - Storage size of the destination string.
+       * @param program - Destination buffer.
+       */
+      template <std::size_t N>
+      explicit constexpr ProgramWriter(Constexpr::string<N>& program) noexcept
+      : ProgramWriter(program.data(), program.data() + program.capacity())
+      {
+        program.resize(program.capacity());
+      }
+
+      /**
+       * @brief Returns a pointer to the next byte that will be written.
+       *
+       * @return program_cursor_t - Current write cursor.
+       */
+      constexpr program_cursor_t program_cursor() const noexcept {
+        return m_cursor;
+      }
+
+      /**
+       * @brief Returns the number of bytes already written.
+       *
+       * @return std::size_t - Written byte count.
+       */
+      constexpr std::size_t size() const noexcept {
+        return static_cast<std::size_t>(m_cursor - m_begin);
+      }
+
+      /**
+       * @brief Returns a writable reference to a byte already inside the buffer.
+       *
+       * @param cursor - Pointer to the byte to patch.
+       * @return char& - Writable byte reference.
+       */
+      constexpr char& byte_at(program_cursor_t cursor) {
+        assert(m_begin <= cursor && cursor < m_end);
+        return *cursor;
+      }
+
+      /**
+       * @brief Returns a const reference to a byte already inside the buffer.
+       *
+       * @param cursor - Pointer to the byte to inspect.
+       * @return char const& - Const byte reference.
+       */
+      constexpr char const& byte_at(program_cursor_t cursor) const {
+        assert(m_begin <= cursor && cursor < m_end);
+        return *cursor;
+      }
+
+      /**
+       * @brief Appends one opcode byte.
+       *
+       * @param cmd - Opcode to append.
+       */
+      constexpr void write_opcode(eEnumCommand cmd) {
+        write_byte(static_cast<std::uint8_t>(cmd));
+      }
+
+      /**
+       * @brief Appends one fixed-width integer.
+       *
+       * @tparam T - Integral value type.
+       * @param value - Value to append.
+       */
+      template <typename T,
+        typename std::enable_if_t<std::is_integral<T>::value && !std::is_same<T, bool>::value, int> = 0>
+      constexpr void write_int(T value) {
+        if constexpr (sizeof(T) == 1) {
+          write_byte(static_cast<std::uint8_t>(value));
+        } else {
+          m_cursor = Constexpr::encode_int(m_cursor, m_end, value);
+        }
+      }
+
+      /**
+       * @brief Appends one dynamic-length integer.
+       *
+       * @tparam T - Integral value type.
+       * @param value - Value to append.
+       */
+      template <typename T,
+        typename std::enable_if_t<std::is_integral<T>::value && !std::is_same<T, bool>::value, int> = 0>
+      constexpr void write_dint(T value) {
+        m_cursor = Constexpr::encode_dint(m_cursor, m_end, value);
+      }
+
+      /**
+       * @brief Appends a NUL-terminated string.
+       *
+       * @param value - String to append without its terminator.
+       */
+      constexpr void write_c_string(std::string_view value) {
+        for (char const ch : value) {
+          write_byte(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+        }
+        write_byte(0u);
+      }
+
+      /**
+       * @brief Updates a constexpr string's logical size to match the bytes written.
+       *
+       * @tparam N - Storage size of the destination string.
+       * @param program - Destination string that backs this writer.
+       */
+      template <std::size_t N>
+      constexpr void finish(Constexpr::string<N>& program) const {
+        assert(program.data() == m_begin);
+        assert(program.data() + program.capacity() == m_end);
+        program.resize(size());
+      }
+
+    private:
+      /**
+       * @brief Appends one raw byte.
+       *
+       * @param byte - Byte to append.
+       */
+      constexpr void write_byte(std::uint8_t byte) {
+        assert(m_cursor != m_end || !"Not enough space to store in buffer");
+        *m_cursor++ = static_cast<char>(byte);
       }
     };
 
@@ -374,36 +509,291 @@ namespace Constexpr {
     template <typename E>
     struct ScopeData {
       E scope_bitmask{ static_cast<E>(-1) };
-      // eBlockType           part_of_block{ eBlockPartOf::Global };
-      int remaining_items_allowed_in_block{}; // ignored for global block
+      int remaining_items_allowed_in_block{ -1 }; // Negative means the current scope has no block-local limit.
 
-      void set_scope_bitmask(E new_bitmask) {
+      /**
+       * @brief Narrows the active scope bitmask.
+       *
+       * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
+       */
+      constexpr void set_scope_bitmask(E new_bitmask) {
         assert((scope_bitmask & new_bitmask) == new_bitmask || !"new_bitmask must be a subset of the scope_bitmask");
         scope_bitmask = new_bitmask;
       }
     };
 
-    template <typename Settings, typename E, typename FnEncodeBlock>
-    constexpr program_cursor_t encode_block(
-      EncodingContext<Settings>& ec, ScopeData<E>& sd, eBlockType block_type, FnEncodeBlock fn_encode_block)
-    {
-      program_cursor_t pc { ec.program_cursor() };
-      if (block_type != eBlockType::Global) {
-        ec.encode_int(eEnumCommand::Terminate); // add an empty opcode
+    template <typename EnumT>
+    class EnumEncoder {
+      EnumT const* m_enum{};
+      ProgramWriter* m_writer{};
+      ScopeData<typename EnumT::value_type> m_scope{};
+      bool m_compress{};
+
+    public:
+      using enum_type = EnumT;
+      using value_type = typename EnumT::value_type;
+
+      /**
+       * @brief Constructs an encoder for one definition-stream emission pass.
+       *
+       * @param enum_def - Immutable enum representation to read from.
+       * @param writer - Writable stream sink.
+       * @param compress - Whether scoped integer values should be condensed as dints.
+       */
+      constexpr EnumEncoder(EnumT const& enum_def, ProgramWriter& writer, bool compress = false) noexcept
+      : m_enum{ &enum_def }
+      , m_writer{ &writer }
+      , m_scope{}
+      , m_compress{ compress }
+      {
       }
 
-      ScopeData<E> new_sd { sd };
-      size_t max_items { max_items_for_block(block_type) };
-      new_sd.remaining_items_allowed_in_block = max_items;
+      /**
+       * @brief Constructs an encoder with an explicit starting scope snapshot.
+       *
+       * @param enum_def - Immutable enum representation to read from.
+       * @param writer - Writable stream sink.
+       * @param scope - Initial scope state.
+       * @param compress - Whether scoped integer values should be condensed as dints.
+       */
+      constexpr EnumEncoder(
+        EnumT const& enum_def,
+        ProgramWriter& writer,
+        ScopeData<value_type> scope,
+        bool compress = false) noexcept
+      : m_enum{ &enum_def }
+      , m_writer{ &writer }
+      , m_scope{ scope }
+      , m_compress{ compress }
+      {
+      }
 
-      fn_encode_block(new_sd);
+      /**
+       * @brief Returns the immutable enum representation.
+       *
+       * @return EnumT const& - Referenced enum definition.
+       */
+      constexpr EnumT const& enum_def() const noexcept {
+        return *m_enum;
+      }
 
-      // Update the opcode's count parameter
-      size_t encoded_pair_count { max_items - new_sd.remaining_items_allowed_in_block };
+      /**
+       * @brief Returns the writable stream sink.
+       *
+       * @return ProgramWriter& - Referenced output sink.
+       */
+      constexpr ProgramWriter& writer() const noexcept {
+        return *m_writer;
+      }
+
+      /**
+       * @brief Returns the active scope snapshot.
+       *
+       * @return ScopeData<value_type>& - Mutable scope state.
+       */
+      constexpr ScopeData<value_type>& scope_data() noexcept {
+        return m_scope;
+      }
+
+      /**
+       * @brief Returns the active scope snapshot as const.
+       *
+       * @return ScopeData<value_type> const& - Const scope state.
+       */
+      constexpr ScopeData<value_type> const& scope_data() const noexcept {
+        return m_scope;
+      }
+
+      /**
+       * @brief Returns the current scope bitmask.
+       *
+       * @return value_type - Current scope bitmask.
+       */
+      constexpr value_type scope_bitmask() const noexcept {
+        return m_scope.scope_bitmask;
+      }
+
+      /**
+       * @brief Narrows the current scope bitmask.
+       *
+       * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
+       */
+      constexpr void set_scope_bitmask(value_type new_bitmask) {
+        m_scope.set_scope_bitmask(new_bitmask);
+      }
+
+      /**
+       * @brief Returns the mutable remaining item count for the current limited block.
+       *
+       * @return int& - Remaining item count or `-1` for an unlimited scope.
+       */
+      constexpr int& remaining_items_allowed_in_block() noexcept {
+        return m_scope.remaining_items_allowed_in_block;
+      }
+
+      /**
+       * @brief Returns the remaining item count for the current limited block.
+       *
+       * @return int - Remaining item count or `-1` for an unlimited scope.
+       */
+      constexpr int remaining_items_allowed_in_block() const noexcept {
+        return m_scope.remaining_items_allowed_in_block;
+      }
+
+      /**
+       * @brief Returns whether scoped integers are emitted in compressed form.
+       *
+       * @return bool - `true` when scoped values are condensed as dints.
+       */
+      constexpr bool compress() const noexcept {
+        return m_compress;
+      }
+
+      /**
+       * @brief Returns a pointer to the next byte to be written in the program buffer.
+       *
+       * @return program_cursor_t - Current write position in the program buffer.
+       */
+      constexpr program_cursor_t program_cursor() const noexcept {
+        return m_writer->program_cursor();
+      }
+
+      /**
+       * @brief Returns a writable reference to a previously written byte.
+       *
+       * @param cursor - Pointer to the byte to patch.
+       * @return char& - Writable byte reference.
+       */
+      constexpr char& byte_at(program_cursor_t cursor) {
+        return m_writer->byte_at(cursor);
+      }
+
+      /**
+       * @brief Returns a const reference to a previously written byte.
+       *
+       * @param cursor - Pointer to the byte to inspect.
+       * @return char const& - Const byte reference.
+       */
+      constexpr char const& byte_at(program_cursor_t cursor) const {
+        return m_writer->byte_at(cursor);
+      }
+
+      /**
+       * @brief Bitwise-ORs selected bits into a previously written byte.
+       *
+       * @tparam T - Integral or enum byte-sized source of bits.
+       * @param cursor - Pointer to the byte to update.
+       * @param bits - Bits to OR into the byte.
+       */
+      template <typename T>
+      constexpr void or_byte_at(program_cursor_t cursor, T bits) {
+        auto const updated_byte {
+          static_cast<unsigned char>(byte_at(cursor)) | static_cast<unsigned char>(bits)
+        };
+        byte_at(cursor) = static_cast<char>(updated_byte);
+      }
+
+      /**
+       * @brief Encodes the referenced stored string into the stream as a NUL-terminated sequence.
+       *
+       * @param id - String id.
+       */
+      constexpr void encode_string(string_id_t id) {
+        m_writer->write_c_string(m_enum->get_string(id));
+      }
+
+      /**
+       * @brief Encodes a scoped value, compressing it when this encoder is configured to do so.
+       *
+       * @tparam T - Value type.
+       * @param value - Value to encode.
+       * @param scope_bitmask - Active scope bitmask for validation and condensation.
+       */
+      template <typename T>
+      constexpr void encode_int(T value, T scope_bitmask) {
+        assert((value & scope_bitmask) == value || !"value must be a subset of scope_bitmask");
+        if (m_compress) {
+          assert(sizeof(T) > 1 || !"Can't compress a type that has a byte length of 1.");
+          auto const mask { make_unsigned_equivalent(scope_bitmask) };
+          auto const cvalue { condense(mask, make_unsigned_equivalent(value), true) };
+          m_writer->write_dint(cvalue);
+        } else if constexpr (std::is_enum<T>::value) {
+          using UT = typename std::underlying_type<T>::type;
+          m_writer->write_int(static_cast<UT>(value));
+        } else {
+          m_writer->write_int(value);
+        }
+      }
+
+      /**
+       * @brief Encodes one enum-stream opcode byte.
+       *
+       * @param cmd - Opcode to encode.
+       */
+      constexpr void encode_int(eEnumCommand cmd) {
+        m_writer->write_opcode(cmd);
+      }
+
+      /**
+       * @brief Retrieves an unresolved stored item variant by id.
+       *
+       * @param item_id - Item id to look up.
+       * @return typename EnumT::item_variant const& - Stored item variant.
+       */
+      constexpr typename EnumT::item_variant const& item(item_id_t item_id) const {
+        return m_enum->item(item_id);
+      }
+
+      /**
+       * @brief Retrieves a stored item as a specific type.
+       *
+       * @tparam Item - Requested stored item type.
+       * @param item_id - Item id to look up.
+       * @return Item const& - Stored item.
+       */
+      template <typename Item>
+      constexpr Item const& item(item_id_t item_id) const {
+        return m_enum->template item<Item>(item_id);
+      }
+    };
+
+    /**
+     * @brief Starts a new counted block, encodes its body, then patches the reserved opcode byte
+     *   with the number of elements stored.
+     *
+     * @tparam EnumT - Referenced enum representation type.
+     * @tparam FnEncodeBlock - Callback type used to encode the child block.
+     * @param ec - Active encoder for the parent scope.
+     * @param block_type - Shape of the block being emitted.
+     * @param fn_encode_block - Callback that emits the child block using a copied encoder.
+     * @return program_cursor_t - Pointer to the reserved opcode byte.
+     */
+    template <typename EnumT, typename FnEncodeBlock>
+    constexpr program_cursor_t encode_block(
+      EnumEncoder<EnumT>& ec, eBlockType block_type, FnEncodeBlock fn_encode_block)
+    {
+      program_cursor_t pc { ec.program_cursor() };
+      if (block_type == eBlockType::Global) {
+        fn_encode_block(ec);
+        return pc;
+      }
+
+      ec.encode_int(eEnumCommand::Terminate); // Add a placeholder opcode byte.
+
+      auto new_ec { ec };
+      size_t const max_items { max_items_for_block(block_type) };
+      new_ec.remaining_items_allowed_in_block() = static_cast<int>(max_items);
+
+      fn_encode_block(new_ec);
+
+      // Update the opcode's count parameter.
+      size_t encoded_pair_count =
+        static_cast<size_t>(max_items - static_cast<size_t>(new_ec.remaining_items_allowed_in_block()));
       if (does_count_start_from_one(block_type)) {
         encoded_pair_count -= 1;
       }
-      *pc |= static_cast<char>(encoded_pair_count);
+
+      ec.or_byte_at(pc, encoded_pair_count);
       return pc;
     }
 
@@ -413,20 +803,26 @@ namespace Constexpr {
       string_id_t name_id{};
       item_id_t next_pairs_id{};
 
-      template <typename Settings>
-      constexpr auto encode(EncodingContext<Settings>& ec, ScopeData<E>& sd) {
-        if (sd.remaining_items_allowed_in_block) {
-          sd.remaining_items_allowed_in_block -= 1;
-          ec.encode_int(value, sd.scope_bitmask);
+      /**
+       * @brief Encodes this pair node into the active named branch.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+        if (ec.remaining_items_allowed_in_block() > 0) {
+          ec.remaining_items_allowed_in_block() -= 1;
+          ec.encode_int(value, ec.scope_bitmask());
           ec.encode_string(name_id);
           if (next_pairs_id) {
-            ec.template item<Pairs<E>>(next_pairs_id).encode(ec, sd);
+            ec.template item<Pairs<E>>(next_pairs_id).encode(ec);
           }
         } else {
           program_cursor_t pc =
-            encode_block(ec, sd, eBlockType::Continue,
-              [&](ScopeData<E>& new_sd) { encode(ec, new_sd); });
-          *pc |= eEnumCommand::ContinueScope;
+            encode_block(ec, eBlockType::ContPair,
+              [&](auto& new_ec) { encode(new_ec); });
+          ec.or_byte_at(pc, eEnumCommand::ContinueScope);
         }
       }
     };
@@ -442,29 +838,35 @@ namespace Constexpr {
       item_id_t pairs_id{}; // Type:  Pairs<E>
       // item_id_t last_pairs_id{}; // optimisation
 
-      template <typename Settings>
-      constexpr auto encode(EncodingContext<Settings>& ec, ScopeData<E>& sd) {
+      /**
+       * @brief Encodes this named block and its child pairs.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode(EnumEncoder<EnumT>& ec) const {
         assert(pairs_id || !"Can't define a Named block with no pairs.");
 
         program_cursor_t pc =
-          encode_block(ec, sd, eBlockType::Named,
-            [&](ScopeData<E>& new_sd) {
+          encode_block(ec, eBlockType::Pair,
+            [&](auto& new_ec) {
               if (has_mask) {
-                ec.encode_int(mask, sd.scope_bitmask);
-                new_sd.set_scope_bitmask(mask);
+                new_ec.encode_int(mask, ec.scope_bitmask());
+                new_ec.set_scope_bitmask(mask);
               }
 
-              ec.template item<Pairs<E>>(pairs_id).encode(ec, new_sd);
+              new_ec.template item<Pairs<E>>(pairs_id).encode(new_ec);
           });
 
-        // Update the opcode
+        // Update the opcode.
         eEnumCommand opCode {};
         if (has_mask) {
           opCode = (eEnumCommand::Named | eEnumCommand::fHasBitmask);
         } else {
           opCode = (eEnumCommand::Named);
         }
-        *pc |= opCode;
+        ec.or_byte_at(pc, opCode);
       }
     };
 
@@ -474,9 +876,15 @@ namespace Constexpr {
       eEnumCommand format{};
       string_id_t name_id{};
 
-      template <typename Settings>
-      constexpr auto encode(EncodingContext<Settings>& ec, ScopeData<E>& sd) {
-        ec.encode_int(mask, sd.scope_bitmask);
+      /**
+       * @brief Encodes this numeric payload body.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+        ec.encode_int(mask, ec.scope_bitmask());
         ec.encode_string(name_id);
       }
     };
@@ -507,18 +915,25 @@ namespace Constexpr {
        * @param ec - Encoding context that owns this group's items.
        * @return eGroupEncodingForm - Best conditional encoding form.
        */
-      template <typename Settings>
-      constexpr eGroupEncodingForm encoding_form(EncodingContext<Settings>& ec) const {
+      /**
+       * @brief Classifies how this group can be encoded inside a conditional.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param enum_def - Enum representation that owns the referenced items.
+       * @return eGroupEncodingForm - Best conditional encoding form.
+       */
+      template <typename EnumT>
+      constexpr eGroupEncodingForm encoding_form(EnumT const& enum_def) const {
         if (!cmds_id) {
           return eGroupEncodingForm::None;
         }
 
-        auto const& cmds { ec.template item<Cmds<E>>(cmds_id) };
+        auto const& cmds { enum_def.template item<Cmds<E>>(cmds_id) };
         if (cmds.next_id) {
           return eGroupEncodingForm::Commands;
         }
 
-        auto& cmd { ec.item(cmds.command_id) };
+        auto const& cmd { enum_def.item(cmds.command_id) };
         if (auto const named { std::get_if<Named<E>>(&cmd) }) {
           return named->has_mask ? eGroupEncodingForm::Commands : eGroupEncodingForm::NamedPairs;
         }
@@ -537,14 +952,24 @@ namespace Constexpr {
     };
 
     template <typename E>
-    class Conditional {
-      E group_bitmask; 
-      item_id_t  true_group_id;
-      item_id_t false_group_id;
+    struct Conditional {
+      E group_bitmask{};
+      item_id_t true_group_id{};
+      item_id_t false_group_id{};
 
-      template <typename Settings>
-      constexpr auto encode(EncodingContext<Settings>& ec, ScopeData<E>& sd) {
-        ScopeData<E> new_sd { sd };
+      /**
+       * @brief Encodes this conditional block.
+       *
+       * The detailed opcode selection is still under active development, so
+       * this prototype only preserves the current placeholder structure while
+       * compiling against the split encoder model.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+        auto new_ec { ec };
 
         // If true_cmds exist and have only one Numeric then
         //   encode true_cmds
@@ -589,40 +1014,62 @@ namespace Constexpr {
         
         // Encode true commands/pairs
         program_cursor_t pc =
-          encode_block(ec, new_sd, eBlockType::If, [&](ScopeData<E> new_sd) {
+          encode_block(ec, eBlockType::IfCmd, [&](auto& child_ec) {
             // need to add name for group if specified in true group
-            (void)new_sd;
+            (void)child_ec;
           });
         // update opcode to appropriate GroupIf* command code
 
         // Encode false commands/pairs (else)
         pc =
-          encode_block(ec, new_sd, eBlockType::If, [&](ScopeData<E> new_sd) {
+          encode_block(ec, eBlockType::ElseCmd, [&](auto& child_ec) {
             // need to add name for group if specified in true group
-            (void)new_sd;
+            (void)child_ec;
           });
         // update opcode to appropriate GroupIf* command code
         
         (void)pc;
+        (void)new_ec;
+        (void)group_bitmask;
+        (void)true_group_id;
+        (void)false_group_id;
       }
     };
 
     template <typename E>
     struct Cmds {
-      item_id_t command_id;
-      item_id_t next_id;
+      item_id_t command_id{};
+      item_id_t next_id{};
 
-      template <typename Settings>
-      constexpr auto encode(EncodingContext<Settings>& ec, ScopeData<E>& sd) {
-        auto dispatch = overload{
-          [&](Named<E>&       cmd) { cmd.encode(ec, sd); },
-          [&](Numeric<E>&     cmd) { cmd.encode(ec, sd); },
-          [&](Conditional<E>& cmd) { cmd.encode(ec, sd); },
+      /**
+       * @brief Encodes this command-list node and any following sibling commands.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+        auto const dispatch_current = overload{
+          [&ec](Named<E> const&       cmd) { cmd.encode(ec); },
+          [&ec](Numeric<E> const&     cmd) { cmd.encode(ec); },
+          [&ec](Conditional<E> const& cmd) { cmd.encode(ec); },
+          [](auto const&) { assert(false && !"Command list must reference a command item."); },
         };
-        dispatch(ec.item(command_id));
+
+        if (ec.remaining_items_allowed_in_block() < 0) {
+          std::visit(dispatch_current, ec.item(command_id));
+        } else if (ec.remaining_items_allowed_in_block() > 0) {
+          ec.remaining_items_allowed_in_block() -= 1;
+          std::visit(dispatch_current, ec.item(command_id));
+        } else {
+          program_cursor_t pc =
+            encode_block(ec, eBlockType::ContCmd, [&](auto& new_ec) { encode(new_ec); });
+          ec.or_byte_at(pc, eEnumCommand::ContinueScope);
+          return;
+        }
 
         if (next_id) {
-          ec.template item<Cmds<E>>(next_id).encode(ec, sd);
+          ec.template item<Cmds<E>>(next_id).encode(ec);
         }
       }
     };
@@ -644,14 +1091,14 @@ namespace Constexpr {
      * @param group_id - Group id to classify. Zero means the branch is absent.
      * @return eGroupEncodingForm - Conditional encoding form for the branch.
      */
-    template <typename Settings, typename E>
+    template <typename EnumT, typename E = typename EnumT::value_type>
     constexpr eGroupEncodingForm classify_group_encoding_form(
-      EncodingContext<Settings>& ec, item_id_t group_id)
+      EnumT const& enum_def, item_id_t group_id)
     {
       if (!group_id) {
         return eGroupEncodingForm::None;
       }
-      return ec.template item<Group<E>>(group_id).encoding_form(ec);
+      return enum_def.template item<Group<E>>(group_id).encoding_form(enum_def);
     }
 
     /**
@@ -713,14 +1160,14 @@ namespace Constexpr {
      * @param false_group_id - Item id for the false branch group.
      * @return ConditionalEncodingPlan - Selected inline/else groups and opcodes.
      */
-    template <typename Settings, typename E>
+    template <typename EnumT>
     constexpr ConditionalEncodingPlan make_conditional_encoding_plan(
-      EncodingContext<Settings>& ec, item_id_t true_group_id, item_id_t false_group_id)
+      EnumT const& enum_def, item_id_t true_group_id, item_id_t false_group_id)
     {
       return make_conditional_encoding_plan(
-        classify_group_encoding_form<Settings, E>(ec, true_group_id),
+        classify_group_encoding_form(enum_def, true_group_id),
         true_group_id,
-        classify_group_encoding_form<Settings, E>(ec, false_group_id),
+        classify_group_encoding_form(enum_def, false_group_id),
         false_group_id);
     }
 
