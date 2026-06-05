@@ -148,8 +148,8 @@ namespace Constexpr {
       *   will never be 0.
       */
     template <typename T>
-    constexpr item_id_t add_item(T item) {
-      memory.at(next_id) = Variant{ item };
+    constexpr item_id_t add_item(T&& item) {
+      memory.at(next_id) = Variant{ std::forward<T>(item) };
       return ++next_id;
     }
 
