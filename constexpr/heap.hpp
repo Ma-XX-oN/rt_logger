@@ -12,27 +12,34 @@
  #define CONSTEXPR_HEAP_HPP
 
 #include <cstdlib>
+#include <cstdint>
+#include <limits>
 #include <string_view>
 #include <array>
 #include "constexpr/string.hpp"
 
 namespace Constexpr {
 
-   /**
-    * @brief Poor-man's constexpr heap for strings in c++17.
-    *
-    * Strings never get deleted.
-    *
-    * @tparam N - Maximum number of char characters to hold.  Each string is
-    *   terminated by a NUL. Storing a string with an embedded NUL is possible,
-    *   but to retrieve it, the 2 parameter get_string() function must be used.
-    *   The second parameter can be requested calling the end_id() value after
-    *   add_string() call.
-    *
-    *   There is \b ALWAYS an implicit NUL character stored after each string.
-    */
-  template <std::size_t N>
+  using string_id_t = std::uint16_t;
+
+  /**
+   * @brief Poor-man's constexpr heap for strings in c++17.
+   *
+   * Strings never get deleted.
+   *
+   * @tparam N - Maximum number of char characters to hold.  Each string is
+   *   terminated by a NUL. Storing a string with an embedded NUL is possible,
+   *   but to retrieve it, the 2 parameter get_string() function must be used.
+   *   The second parameter can be requested calling the end_id() value after
+   *   add_string() call.
+   *
+   *   There is \b ALWAYS an implicit NUL character stored after each string.
+   */
+  template <std::uint16_t N>
   class Strings {
+    static_assert(N < std::numeric_limits<std::uint16_t>::max(),
+      "Exceeded the maximum number of string space allowed.");
+
     string<N+1> memory;
 
   public:
@@ -40,27 +47,27 @@ namespace Constexpr {
       * @brief Add a string to the memory store.
       *
       * @param str_to_register - String to register in memory.
-      * @return std::size_t - Returns the begin_id that can be used with
+      * @return string_id_t - Returns the begin_id that can be used with
       *   get_string().  Value will never be 0.
       */
-    constexpr std::size_t add_string(std::string_view str_to_register) {
+    constexpr string_id_t add_string(std::string_view str_to_register) {
       auto length { memory.length() };
       memory.append(str_to_register);
       memory.push_back('\0');
-      return length+1;
+      return static_cast<string_id_t>(length + 1);
     }
 
     /**
       * @brief Get the end id for the string just registered before.
       * 
-      * @return std::size_t - End id.
+      * @return string_id_t - End id.
       */
-    constexpr std::size_t end_id() const {
+    constexpr string_id_t end_id() const {
       auto length{ memory.size() };
       if (length) {
         --length;
       }
-      return length;
+      return static_cast<string_id_t>(length);
     }
 
     /**
@@ -72,7 +79,7 @@ namespace Constexpr {
       * @param begin_id - Begin id previously returned by add_string().
       * @return std::string_view - View of the stored string.
       */
-    constexpr std::string_view get_string(std::size_t begin_id) const {
+    constexpr std::string_view get_string(string_id_t begin_id) const {
       assert(begin_id);
       assert(begin_id < memory.size());
       return std::string_view(memory.begin() + begin_id - 1);
@@ -85,13 +92,15 @@ namespace Constexpr {
       * @param end_id - End id for the requested range.
       * @return std::string_view - View spanning the requested range.
       */
-    constexpr std::string_view get_string(std::size_t begin_id, std::size_t end_id) const {
+    constexpr std::string_view get_string(string_id_t begin_id, string_id_t end_id) const {
       assert(begin_id);
       assert(begin_id < end_id && end_id <= memory.size());
       return std::string_view(memory.begin() + begin_id - 1, end_id - begin_id);
     }
   };
   
+
+  using item_id_t = std::uint16_t;
 
   /**
     * @brief Poor-man's constexpr heap for objects that are about the same size
@@ -117,10 +126,13 @@ namespace Constexpr {
     * @tparam N - Maximum number of objects that can be stored.
     * @tparam Variant - Common storage type used for every stored object.
     */
-  template <std::size_t N, typename Variant>
+  template <std::uint16_t N, typename Variant>
   class Items {
+    static_assert(N < std::numeric_limits<std::uint16_t>::max(),
+      "Exceeded the maximum number of allocatable items allowed.");
+
     std::array<Variant, N> memory{};
-    std::size_t next_id{0};
+    std::uint16_t next_id{0};
 
   public:
     /**
@@ -128,59 +140,85 @@ namespace Constexpr {
       *
       * @tparam T - Type assignable into \p Variant.
       * @param item - Item to store.
-      * @return std::size_t - Id that can later be used with get_item().  Value
+      * @return item_id_t - Id that can later be used with get_item().  Value
       *   will never be 0.
       */
     template <typename T>
-    constexpr std::size_t add_item(T item) {
+    constexpr item_id_t add_item(T item) {
       memory.at(next_id) = item;
       return ++next_id;
     }
 
     /**
-      * @brief Access a previously stored item by id.
+      * @brief Retrieves a previously stored item by id.
       *
       * @param id - Id returned by add_item().
       * @return auto& - Reference to the stored item slot.
       */
-    constexpr auto& get_item(std::size_t id) {
+    constexpr auto& get_item(item_id_t id) {
       assert(id && id <= next_id || !"Out of bounds");
       return memory.at(id-1);
     }
 
     /**
-      * @brief Access a previously stored item as const by id.
+      * @brief Retrieves a previously stored item as const by id.
       *
       * @param id - Id returned by add_item().
       * @return auto& - Reference to the stored item slot.
       */
-    constexpr auto& get_item(std::size_t id) const {
+    constexpr auto& get_item(item_id_t id) const {
       assert(id && id <= next_id || !"Out of bounds");
       return memory.at(id-1);
     }
 
     /**
-      * @brief Access a previously stored item as Item type by id.
+      * @brief Retrieves a previously stored item as Item type by id.
       *
       * @param id - Id returned by add_item().
       * @return auto& - Reference to the stored item slot.
       */
     template <typename Item>
-    constexpr auto& get_item(std::size_t id) {
+    constexpr auto& get_item(item_id_t id) {
       assert(id && id <= next_id || !"Out of bounds");
       return std::get<Item>(memory.at(id-1));
     }
 
     /**
-      * @brief Access a previously stored item as const Item type by id.
+      * @brief Retrieves a previously stored item as const Item type by id.
       *
       * @param id - Id returned by add_item().
       * @return auto& - Reference to the stored item slot.
       */
     template <typename Item>
-    constexpr auto& get_item(std::size_t id) const {
+    constexpr auto& get_item(item_id_t id) const {
       assert(id && id <= next_id || !"Out of bounds");
       return std::get<Item>(memory.at(id-1));
+    }
+
+    /**
+      * @brief Retrieves a previously stored item as Item type pointer by id if
+      *   correct type, otherwise return nullptr.
+      *
+      * @param id - Id returned by add_item().
+      * @return auto* - Pointer to the stored item slot or nullptr.
+      */
+    template <typename Item>
+    constexpr auto* get_item_if(item_id_t id) {
+      assert(id && id <= next_id || !"Out of bounds");
+      return std::get_if<Item>(&memory.at(id-1));
+    }
+
+    /**
+      * @brief Retrieves a previously stored item as Item type pointer by id if
+      *   correct type, otherwise return nullptr.
+      *
+      * @param id - Id returned by add_item().
+      * @return auto* - Pointer to the stored item slot or nullptr.
+      */
+    template <typename Item>
+    constexpr auto const* get_item_if(item_id_t id) const {
+      assert(id && id <= next_id || !"Out of bounds");
+      return std::get_if<Item>(&memory.at(id-1));
     }
   };
 
