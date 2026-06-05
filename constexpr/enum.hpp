@@ -181,128 +181,6 @@ namespace Constexpr {
 
     using size_t = std::uint16_t;
 
-  } // namespace impl
-
-  /**
-   * @brief Immutable enum-definition storage plus builder-time mutation helpers.
-   *
-   * @tparam Settings - Representation settings.
-   */
-  template <typename Settings>
-  class Enum {
-    using Variant = typename Settings::ItemVariant;
-
-    Strings<Settings::MAX_STRING_STORAGE> strings{};
-    Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
-
-  public:
-    using value_type = typename Settings::Value;
-    using item_variant = Variant;
-
-    /**
-     * @brief Registers a string in the backing string store.
-     *
-    * @param value - String to store.
-     * @return string_id_t - Stable id for later lookups.
-     */
-    constexpr string_id_t add_string(std::string_view value) {
-      return strings.add_string(value);
-    }
-
-    /**
-     * @brief Registers an item in the backing item store.
-     *
-     * @tparam Item - Type assignable into the configured item variant.
-     * @param item - Item to store.
-     * @return item_id_t - Stable id for later lookups.
-     */
-    template <typename Item>
-    constexpr item_id_t add_item(Item item) {
-      return items.add_item(item);
-    }
-
-    /**
-     * @brief Retrieves a stored string view by id.
-     *
-     * @param id - String id.
-     * @return std::string_view - View of the stored string.
-     */
-    constexpr std::string_view get_string(string_id_t id) const {
-      return strings.get_string(id);
-    }
-
-    /**
-     * @brief Retrieves a stored item variant by id.
-     *
-     * @param item_id - Item id.
-     * @return Variant& - Reference to the stored item variant.
-     */
-    constexpr Variant& item(item_id_t item_id) {
-      return items.get_item(item_id);
-    }
-
-    /**
-     * @brief Retrieves a stored item variant by id as const.
-     *
-     * @param item_id - Item id.
-     * @return Variant const& - Reference to the stored item variant.
-     */
-    constexpr Variant const& item(item_id_t item_id) const {
-      return items.get_item(item_id);
-    }
-
-    /**
-     * @brief Retrieves a stored item as a specific type.
-     *
-     * @tparam Item - Requested stored item type.
-     * @param item_id - Item id.
-     * @return Item& - Reference to the stored item.
-     */
-    template <typename Item>
-    constexpr Item& item(item_id_t item_id) {
-      return items.template get_item<Item>(item_id);
-    }
-
-    /**
-     * @brief Retrieves a stored item as a specific type with const access.
-     *
-     * @tparam Item - Requested stored item type.
-     * @param item_id - Item id.
-     * @return Item const& - Reference to the stored item.
-     */
-    template <typename Item>
-    constexpr Item const& item(item_id_t item_id) const {
-      return items.template get_item<Item>(item_id);
-    }
-
-    /**
-     * @brief Retrieves a previously stored item as Item type pointer by id if
-     *   correct type, otherwise return nullptr.
-     *
-     * @param item_id - Item id.
-     * @return Variant const* - Pointer to the stored item variant or nullptr
-     *   if not that type.
-     */
-    template <typename Item>
-    constexpr auto* item_if(item_id_t item_id) {
-      return items.template get_item_if<Item>(item_id);
-    }
-
-    /**
-     * @brief Retrieves a previously stored item as Item type pointer by id if
-     *   correct type, otherwise return nullptr.
-     *
-     * @param item_id - Item id.
-     * @return Variant const* - Pointer to the stored item variant or nullptr
-     *   if not that type.
-     */
-    template <typename Item>
-    constexpr auto const* item_if(item_id_t item_id) const {
-      return items.template get_item_if<Item>(item_id);
-    }
-  };
-
-  namespace impl {
     /**
      * @brief Collect immutable enum-representation settings in one place.
      *
@@ -1207,6 +1085,124 @@ namespace Constexpr {
 
   } // namespace impl
 
+  /**
+   * @brief Immutable enum-definition storage plus builder-time mutation helpers.
+   *
+   * @tparam Settings - Representation settings.
+   */
+  template <typename Settings>
+  class Enum {
+    using Variant = typename Settings::ItemVariant;
+
+    Strings<Settings::MAX_STRING_STORAGE> strings{};
+    Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
+
+  public:
+    using value_type = typename Settings::Value;
+    using item_variant = Variant;
+
+    /**
+     * @brief Registers a string in the backing string store.
+     *
+    * @param value - String to store.
+     * @return string_id_t - Stable id for later lookups.
+     */
+    constexpr string_id_t add_string(std::string_view value) {
+      return strings.add_string(value);
+    }
+
+    /**
+     * @brief Registers an item in the backing item store.
+     *
+     * @tparam Item - Type assignable into the configured item variant.
+     * @param item - Item to store.
+     * @return item_id_t - Stable id for later lookups.
+     */
+    template <typename Item>
+    constexpr item_id_t add_item(Item item) {
+      return items.add_item(item);
+    }
+
+    /**
+     * @brief Retrieves a stored string view by id.
+     *
+     * @param id - String id.
+     * @return std::string_view - View of the stored string.
+     */
+    constexpr std::string_view get_string(string_id_t id) const {
+      return strings.get_string(id);
+    }
+
+    /**
+     * @brief Retrieves a stored item variant by id.
+     *
+     * @param item_id - Item id.
+     * @return Variant& - Reference to the stored item variant.
+     */
+    constexpr Variant& item(item_id_t item_id) {
+      return items.get_item(item_id);
+    }
+
+    /**
+     * @brief Retrieves a stored item variant by id as const.
+     *
+     * @param item_id - Item id.
+     * @return Variant const& - Reference to the stored item variant.
+     */
+    constexpr Variant const& item(item_id_t item_id) const {
+      return items.get_item(item_id);
+    }
+
+    /**
+     * @brief Retrieves a stored item as a specific type.
+     *
+     * @tparam Item - Requested stored item type.
+     * @param item_id - Item id.
+     * @return Item& - Reference to the stored item.
+     */
+    template <typename Item>
+    constexpr Item& item(item_id_t item_id) {
+      return items.template get_item<Item>(item_id);
+    }
+
+    /**
+     * @brief Retrieves a stored item as a specific type with const access.
+     *
+     * @tparam Item - Requested stored item type.
+     * @param item_id - Item id.
+     * @return Item const& - Reference to the stored item.
+     */
+    template <typename Item>
+    constexpr Item const& item(item_id_t item_id) const {
+      return items.template get_item<Item>(item_id);
+    }
+
+    /**
+     * @brief Retrieves a previously stored item as Item type pointer by id if
+     *   correct type, otherwise return nullptr.
+     *
+     * @param item_id - Item id.
+     * @return Variant const* - Pointer to the stored item variant or nullptr
+     *   if not that type.
+     */
+    template <typename Item>
+    constexpr auto* item_if(item_id_t item_id) {
+      return items.template get_item_if<Item>(item_id);
+    }
+
+    /**
+     * @brief Retrieves a previously stored item as Item type pointer by id if
+     *   correct type, otherwise return nullptr.
+     *
+     * @param item_id - Item id.
+     * @return Variant const* - Pointer to the stored item variant or nullptr
+     *   if not that type.
+     */
+    template <typename Item>
+    constexpr auto const* item_if(item_id_t item_id) const {
+      return items.template get_item_if<Item>(item_id);
+    }
+  };
 } // namespace Constexpr
 
 #endif // CONSTEXPR_ENUM_HPP
