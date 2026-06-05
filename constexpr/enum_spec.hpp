@@ -178,12 +178,132 @@ struct BitwiseOps<Constexpr::eEnumCommand> : std::true_type {};
 
 namespace Constexpr {
 
-  namespace  impl {
+  namespace impl {
 
     using size_t = std::uint16_t;
-    using item_id_t = std::uint16_t;
-    using string_id_t = std::uint16_t;
 
+  } // namespace impl
+
+  /**
+   * @brief Immutable enum-definition storage plus builder-time mutation helpers.
+   *
+   * @tparam Settings - Representation settings.
+   */
+  template <typename Settings>
+  class Enum {
+    using Variant = typename Settings::ItemVariant;
+
+    Strings<Settings::MAX_STRING_STORAGE> strings{};
+    Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
+
+  public:
+    using value_type = typename Settings::Value;
+    using item_variant = Variant;
+
+    /**
+     * @brief Registers a string in the backing string store.
+     *
+    * @param value - String to store.
+     * @return string_id_t - Stable id for later lookups.
+     */
+    constexpr string_id_t add_string(std::string_view value) {
+      return strings.add_string(value);
+    }
+
+    /**
+     * @brief Registers an item in the backing item store.
+     *
+     * @tparam Item - Type assignable into the configured item variant.
+     * @param item - Item to store.
+     * @return item_id_t - Stable id for later lookups.
+     */
+    template <typename Item>
+    constexpr item_id_t add_item(Item item) {
+      return items.add_item(item);
+    }
+
+    /**
+     * @brief Retrieves a stored string view by id.
+     *
+     * @param id - String id.
+     * @return std::string_view - View of the stored string.
+     */
+    constexpr std::string_view get_string(string_id_t id) const {
+      return strings.get_string(id);
+    }
+
+    /**
+     * @brief Retrieves a stored item variant by id.
+     *
+     * @param item_id - Item id.
+     * @return Variant& - Reference to the stored item variant.
+     */
+    constexpr Variant& item(item_id_t item_id) {
+      return items.get_item(item_id);
+    }
+
+    /**
+     * @brief Retrieves a stored item variant by id as const.
+     *
+     * @param item_id - Item id.
+     * @return Variant const& - Reference to the stored item variant.
+     */
+    constexpr Variant const& item(item_id_t item_id) const {
+      return items.get_item(item_id);
+    }
+
+    /**
+     * @brief Retrieves a stored item as a specific type.
+     *
+     * @tparam Item - Requested stored item type.
+     * @param item_id - Item id.
+     * @return Item& - Reference to the stored item.
+     */
+    template <typename Item>
+    constexpr Item& item(item_id_t item_id) {
+      return items.template get_item<Item>(item_id);
+    }
+
+    /**
+     * @brief Retrieves a stored item as a specific type with const access.
+     *
+     * @tparam Item - Requested stored item type.
+     * @param item_id - Item id.
+     * @return Item const& - Reference to the stored item.
+     */
+    template <typename Item>
+    constexpr Item const& item(item_id_t item_id) const {
+      return items.template get_item<Item>(item_id);
+    }
+
+    /**
+     * @brief Retrieves a previously stored item as Item type pointer by id if
+     *   correct type, otherwise return nullptr.
+     *
+     * @param item_id - Item id.
+     * @return Variant const* - Pointer to the stored item variant or nullptr
+     *   if not that type.
+     */
+    template <typename Item>
+    constexpr auto* item_if(item_id_t item_id) {
+      return items.template get_item_if<Item>(item_id);
+    }
+
+    /**
+     * @brief Retrieves a previously stored item as Item type pointer by id if
+     *   correct type, otherwise return nullptr.
+     *
+     * @param item_id - Item id.
+     * @return Variant const* - Pointer to the stored item variant or nullptr
+     *   if not that type.
+     */
+    template <typename Item>
+    constexpr auto const* item_if(item_id_t item_id) const {
+      return items.template get_item_if<Item>(item_id);
+    }
+  };
+
+  namespace impl {
     /**
      * @brief Collect immutable enum-representation settings in one place.
      *
@@ -201,99 +321,6 @@ namespace Constexpr {
     };
 
     using program_cursor_t = char*;
-
-    /**
-     * @brief Immutable enum-definition storage plus builder-time mutation helpers.
-     *
-     * @tparam Settings - Representation settings.
-     */
-    template <typename Settings>
-    class Enum {
-      using Variant = typename Settings::ItemVariant;
-
-      Strings<Settings::MAX_STRING_STORAGE> strings{};
-      Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
-
-    public:
-      using value_type = typename Settings::Value;
-      using item_variant = Variant;
-
-      /**
-       * @brief Registers a string in the backing string store.
-       *
-       * @param value - String to store.
-       * @return string_id_t - Stable id for later lookups.
-       */
-      constexpr string_id_t add_string(std::string_view value) {
-        return static_cast<string_id_t>(strings.add_string(value));
-      }
-
-      /**
-       * @brief Registers an item in the backing item store.
-       *
-       * @tparam Item - Type assignable into the configured item variant.
-       * @param item - Item to store.
-       * @return item_id_t - Stable id for later lookups.
-       */
-      template <typename Item>
-      constexpr item_id_t add_item(Item item) {
-        return static_cast<item_id_t>(items.add_item(item));
-      }
-
-      /**
-       * @brief Retrieves a stored string view by id.
-       *
-       * @param id - String id.
-       * @return std::string_view - View of the stored string.
-       */
-      constexpr std::string_view get_string(string_id_t id) const {
-        return strings.get_string(id);
-      }
-
-      /**
-       * @brief Retrieves a stored item variant by id.
-       *
-       * @param item_id - Item id.
-       * @return Variant& - Reference to the stored item variant.
-       */
-      constexpr Variant& item(item_id_t item_id) {
-        return items.get_item(item_id);
-      }
-
-      /**
-       * @brief Retrieves a stored item variant by id as const.
-       *
-       * @param item_id - Item id.
-       * @return Variant const& - Reference to the stored item variant.
-       */
-      constexpr Variant const& item(item_id_t item_id) const {
-        return items.get_item(item_id);
-      }
-
-      /**
-       * @brief Retrieves a stored item as a specific type.
-       *
-       * @tparam Item - Requested stored item type.
-       * @param item_id - Item id.
-       * @return Item& - Reference to the stored item.
-       */
-      template <typename Item>
-      constexpr Item& item(item_id_t item_id) {
-        return items.template get_item<Item>(item_id);
-      }
-
-      /**
-       * @brief Retrieves a stored item as a specific type with const access.
-       *
-       * @tparam Item - Requested stored item type.
-       * @param item_id - Item id.
-       * @return Item const& - Reference to the stored item.
-       */
-      template <typename Item>
-      constexpr Item const& item(item_id_t item_id) const {
-        return items.template get_item<Item>(item_id);
-      }
-    };
 
     /**
      * @brief Non-owning byte sink for building a definition stream.
@@ -460,11 +487,11 @@ namespace Constexpr {
                                      //         distinct items
 
       Pair           = 0b0'0'000'10, /// 1-16   16
-      IfPair         = 0b0'0'001'01, /// 0-15   15
-      ElsePair       = 0b0'0'010'00, /// 1-8    8
+      IfPair         = 0b0'0'001'00, /// 0-15   15
+      ElsePair       = 0b0'0'010'01, /// 1-8    8
       ContPair       = 0b0'0'011'11, /// 1-32   32
-      IfCmd          = 0b0'1'001'01, /// 0-15   15
-      ElseCmd        = 0b0'1'010'00, /// 1-8    8
+      IfCmd          = 0b0'1'001'00, /// 0-15   15
+      ElseCmd        = 0b0'1'010'01, /// 1-8    8
       ContCmd        = 0b0'1'011'11, /// 1-32   32
 
       mBlockType     = 0b0'0'111'00,
@@ -515,8 +542,17 @@ namespace Constexpr {
        *
        * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
        */
-      constexpr void set_scope_bitmask(E new_bitmask) {
+      constexpr void verify_scope_bitmask(E new_bitmask) {
         assert((scope_bitmask & new_bitmask) == new_bitmask || !"new_bitmask must be a subset of the scope_bitmask");
+      }
+
+      /**
+       * @brief Narrows the active scope bitmask.
+       *
+       * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
+       */
+      constexpr void set_scope_bitmask(E new_bitmask) {
+        verify_scope_bitmask(new_bitmask);
         scope_bitmask = new_bitmask;
       }
     };
@@ -617,6 +653,15 @@ namespace Constexpr {
        *
        * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
        */
+      constexpr void verify_scope_bitmask(value_type new_bitmask) {
+        m_scope.verify_scope_bitmask(new_bitmask);
+      }
+
+      /**
+       * @brief Narrows the current scope bitmask.
+       *
+       * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
+       */
       constexpr void set_scope_bitmask(value_type new_bitmask) {
         m_scope.set_scope_bitmask(new_bitmask);
       }
@@ -655,6 +700,17 @@ namespace Constexpr {
        */
       constexpr program_cursor_t program_cursor() const noexcept {
         return m_writer->program_cursor();
+      }
+
+      /**
+       * @brief Returns a pointer to the next byte to be written in the program buffer.
+       *
+       * @return program_cursor_t - Current write position in the program buffer.
+       */
+      constexpr program_cursor_t reserve_byte() noexcept {
+        auto cursor = m_writer->program_cursor();
+        encode_int(eEnumCommand::Terminate);
+        return cursor;
       }
 
       /**
@@ -754,27 +810,36 @@ namespace Constexpr {
       constexpr Item const& item(item_id_t item_id) const {
         return m_enum->template item<Item>(item_id);
       }
+
+      /**
+       * @brief Retrieves a stored item as a specific type.
+       *
+       * @tparam Item - Requested stored item type.
+       * @param item_id - Item id to look up.
+       * @return Item const& - Stored item.
+       */
+      template <typename Item>
+      constexpr Item const* item_if(item_id_t item_id) const {
+        return m_enum->template item_if<Item>(item_id);
+      }
     };
 
     /**
-     * @brief Starts a new counted block, encodes its body, then patches the reserved opcode byte
-     *   with the number of elements stored.
+     * @brief Creates a new scope that can limit the number of items to be
+     * generated in a first block and returns how many were.
      *
      * @tparam EnumT - Referenced enum representation type.
      * @tparam FnEncodeBlock - Callback type used to encode the child block.
      * @param ec - Active encoder for the parent scope.
      * @param block_type - Shape of the block being emitted.
-     * @param fn_encode_block - Callback that emits the child block using a copied encoder.
-     * @return program_cursor_t - Pointer to the reserved opcode byte.
+     * @param fn_encode_block - Callback that emits the child block using a
+     * copied encoder.
+     * @return size_t - Number of elements stored in first block.
      */
     template <typename EnumT, typename FnEncodeBlock>
-    constexpr program_cursor_t encode_block(
+    constexpr size_t encode_block(
       EnumEncoder<EnumT>& ec, eBlockType block_type, FnEncodeBlock fn_encode_block)
     {
-      program_cursor_t pc { ec.program_cursor() };
-
-      ec.encode_int(eEnumCommand::Terminate); // Add a placeholder opcode byte.
-
       auto new_ec { ec };
       size_t const max_items { max_items_for_block(block_type) };
       new_ec.remaining_items_allowed_in_block() = static_cast<int>(max_items);
@@ -782,14 +847,12 @@ namespace Constexpr {
       fn_encode_block(new_ec);
 
       // Update the opcode's count parameter.
-      size_t encoded_pair_count =
-        static_cast<size_t>(max_items - static_cast<size_t>(new_ec.remaining_items_allowed_in_block()));
+      size_t number_in_1st_block {
+        static_cast<size_t>(max_items - static_cast<size_t>(new_ec.remaining_items_allowed_in_block())) };
       if (does_count_start_from_one(block_type)) {
-        encoded_pair_count -= 1;
+        number_in_1st_block -= 1;
       }
-
-      ec.or_byte_at(pc, encoded_pair_count);
-      return pc;
+      return number_in_1st_block;
     }
 
     template <typename E>
@@ -814,10 +877,12 @@ namespace Constexpr {
             ec.template item<Pairs<E>>(next_pairs_id).encode(ec);
           }
         } else {
-          program_cursor_t pc =
+          program_cursor_t pc { ec.reserve_byte() };
+          size_t stored {
             encode_block(ec, eBlockType::ContPair,
-              [&](auto& new_ec) { encode(new_ec); });
+              [&](auto& new_ec) { encode(new_ec); }) };
           ec.or_byte_at(pc, eEnumCommand::ContinueScope);
+          ec.or_byte_at(pc, stored);
         }
       }
     };
@@ -843,16 +908,9 @@ namespace Constexpr {
       constexpr void encode(EnumEncoder<EnumT>& ec) const {
         assert(pairs_id || !"Can't define a Named block with no pairs.");
 
-        program_cursor_t pc =
-          encode_block(ec, eBlockType::Pair,
-            [&](auto& new_ec) {
-              if (has_mask) {
-                new_ec.encode_int(mask, ec.scope_bitmask());
-                new_ec.set_scope_bitmask(mask);
-              }
-
-              new_ec.template item<Pairs<E>>(pairs_id).encode(new_ec);
-          });
+        program_cursor_t pc { ec.reserve_byte() };
+        auto new_ec { ec };
+        size_t stored { encode_body(new_ec) };
 
         // Update the opcode.
         eEnumCommand opCode {};
@@ -862,6 +920,30 @@ namespace Constexpr {
           opCode = (eEnumCommand::Named);
         }
         ec.or_byte_at(pc, opCode);
+        ec.or_byte_at(pc, stored);
+      }
+
+      /**
+       * @brief Encodes this named block body using the requested pair-block shape.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       * @param block_type - Pair-block shape used for the first emitted chunk.
+       * @return size_t - Number of items stored in first block.
+       */
+      template <typename EnumT>
+      constexpr size_t encode_body(EnumEncoder<EnumT>& ec, eBlockType block_type = eBlockType::Pair) const {
+        assert(pairs_id || !"Can't define a Named block with no pairs.");
+
+        if (has_mask) {
+          assert(block_type == eBlockType::Pair || !"Can't contain a mask if emitting for an GroupIfNamed/Else");
+          ec.encode_int(mask, ec.scope_bitmask());
+          ec.set_scope_bitmask(mask);
+        }
+        return encode_block(ec, block_type,
+          [&](auto& new_ec) {
+            new_ec.template item<Pairs<E>>(pairs_id).encode(new_ec);
+          }) ;
       }
     };
 
@@ -879,8 +961,23 @@ namespace Constexpr {
        */
       template <typename EnumT>
       constexpr void encode(EnumEncoder<EnumT>& ec) const {
+        ec.encode_int(eEnumCommand::Numeric | format);
+        ec.verify_scope_bitmask(mask);
         ec.encode_int(mask, ec.scope_bitmask());
         ec.encode_string(name_id);
+      }
+
+      /**
+       * @brief Encodes only the inline name payload for a GroupIfNumeric branch.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr eEnumCommand encode_inline_body(EnumEncoder<EnumT>& ec) const {
+        assert(mask == ec.scope_bitmask() || !"Inline numeric branch must use the conditional scope bitmask.");
+        ec.encode_string(name_id);
+        return format;
       }
     };
 
@@ -888,166 +985,171 @@ namespace Constexpr {
     struct Cmds;
 
     template <typename E>
-    struct Global {
-      item_id_t cmds_id{}; // Type: Cmds<E>
-
-      /**
-       * @brief Encodes the root command list.
-       *
-       * @tparam EnumT - Referenced enum representation type.
-       * @param ec - Active encoder for the current scope.
-       */
-      template <typename EnumT>
-      constexpr void encode(EnumEncoder<EnumT>& ec) const {
-        if (!cmds_id) {
-          return;
-        }
-
-        ec.template item<Cmds<E>>(cmds_id).encode(ec);
-      }
-    };
-
-    enum class eGroupEncodingForm : std::uint8_t {
-      None,
-      NamedPairs,
-      Numeric,
-      Commands,
-    };
-
-    template <typename E>
     struct Group {
       string_id_t name_id{};
-      item_id_t cmds_id{};   // Type: Cmds<E>
+      item_id_t cmds_id{};   // Type: Cmds<E> MUST BE SET OR NO Group SHALL EXISTS!
 
-      /**
-       * @brief Classifies how this group can be encoded inside a conditional.
-       *
-       * A missing command list has no branch body. A single unmasked
-       * `Named` command can be emitted as pairs. A single `Numeric` command can
-       * be emitted inline. Everything else requires a command-style branch.
-       *
-       * @tparam Settings - Encoding-context settings type.
-       * @param ec - Encoding context that owns this group's items.
-       * @return eGroupEncodingForm - Best conditional encoding form.
-       */
-      /**
-       * @brief Classifies how this group can be encoded inside a conditional.
-       *
-       * @tparam EnumT - Referenced enum representation type.
-       * @param enum_def - Enum representation that owns the referenced items.
-       * @return eGroupEncodingForm - Best conditional encoding form.
-       */
       template <typename EnumT>
-      constexpr eGroupEncodingForm encoding_form(EnumT const& enum_def) const {
-        if (!cmds_id) {
-          return eGroupEncodingForm::None;
+      constexpr bool has_only_one_Numeric (EnumT const& enum_def) const {
+        assert(cmds_id || !"Invalid Group!");
+        auto& commands { enum_def.template item<Cmds<E>>(cmds_id) };
+        if (!commands.next_id) {
+          if (auto* pNumeric = enum_def.template item_if<Numeric<E>>(commands.command_id)) {
+            return true;
+          }
         }
-
-        auto const& cmds { enum_def.template item<Cmds<E>>(cmds_id) };
-        if (cmds.next_id) {
-          return eGroupEncodingForm::Commands;
-        }
-
-        auto const& cmd { enum_def.item(cmds.command_id) };
-        if (auto const named { std::get_if<Named<E>>(&cmd) }) {
-          return named->has_mask ? eGroupEncodingForm::Commands : eGroupEncodingForm::NamedPairs;
-        }
-        if (std::get_if<Numeric<E>>(&cmd)) {
-          return eGroupEncodingForm::Numeric;
-        }
-        return eGroupEncodingForm::Commands;
+        return false;
       }
 
-      // Group owner will add string if needed and will call encode_block as well.
-      // This is just a placeholder for info, so not defining this function.
-      //
-      // template <typename Settings>
-      // constexpr auto encode(EncodingContext<Settings>& ec, ScopeData<E>& sd) {
-      // }
+      template <typename EnumT>
+      constexpr bool has_only_one_Named_with_no_bitmask (EnumT const& enum_def) const {
+        assert(cmds_id || !"Invalid Group!");
+        auto& commands { enum_def.template item<Cmds<E>>(cmds_id) };
+        if (!commands.next_id) {
+          if (auto* pNamed = enum_def.template item_if<Named<E>>(commands.command_id)) {
+            return !pNamed->has_mask;
+          }
+        }
+        return false;
+      }
     };
 
     template <typename E>
     struct Conditional {
       E group_bitmask{};
-      item_id_t true_group_id{};
-      item_id_t false_group_id{};
+      E bitmask{};
+      item_id_t true_group_id{};  // Type: Group<E> AT LEAST ONE MUST BE SPECIFIED, OR NO CONDITIONAL SHALL EXIST!
+      item_id_t false_group_id{}; // Type: Group<E> AT LEAST ONE MUST BE SPECIFIED, OR NO CONDITIONAL SHALL EXIST!
 
       /**
-       * @brief Encodes this conditional block.
-       *
-       * The detailed opcode selection is still under active development, so
-       * this prototype only preserves the current placeholder structure while
-       * compiling against the split encoder model.
+       * @brief Encodes this conditional block using the selected if/else wire forms.
        *
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
       template <typename EnumT>
       constexpr void encode(EnumEncoder<EnumT>& ec) const {
-        auto new_ec { ec };
+        assert(true_group_id || false_group_id || !"Invalid Conditional!");
 
-        // If true_cmds exist and have only one Numeric then
-        //   encode true_cmds
-        //   update opcode to GroupIfNumeric
-        //   If false_cmds exist
-        //     If false_cmds have only one Named without mask, then
-        //       encode false_cmds
-        //       update opcode to Else
-        //     Else
-        //       encode false_cmds
-        //       update opcode to Else | fElseCmds
-        // Else if false_cmds exist and have only one Numeric then
-        //   encode false_cmds
-        //   update opcode to GroupIfNumeric | Negate
-        //   If true_cmds exist
-        //     If true_cmds have only one Named without mask, then
-        //       encode true_cmds
-        //       update opcode to Else
-        //     Else
-        //       encode true_cmds
-        //       update opcode to Else | fElseCmds
-        // Else if true_cmds exist and have only one Named without mask, then
-        //   encode true_cmds
-        //   update opcode to GroupIfNamed
-        //   If false_cmds exist
-        //     If false_cmds have only one Named without mask, then
-        //       encode false_cmds
-        //       update opcode to Else
-        //     Else
-        //       encode false_cmds
-        //       update opcode to Else | fElseCmds
-        // else
-        //   emit GroupIf
-        //   encode true_cmds
-        //   If false_cmds exist
-        //     If false_cmds have only one Named without mask, then
-        //       encode false_cmds
-        //       update opcode to Else
-        //     Else
-        //       encode false_cmds
-        //       update opcode to Else | fElseCmds
-        
-        // Encode true commands/pairs
-        program_cursor_t pc =
-          encode_block(ec, eBlockType::IfCmd, [&](auto& child_ec) {
-            // need to add name for group if specified in true group
-            (void)child_ec;
-          });
-        // update opcode to appropriate GroupIf* command code
+        auto const& enum_def{ ec.enum_def() };
 
-        // Encode false commands/pairs (else)
-        pc =
-          encode_block(ec, eBlockType::ElseCmd, [&](auto& child_ec) {
-            // need to add name for group if specified in true group
-            (void)child_ec;
-          });
-        // update opcode to appropriate GroupIf* command code
+        auto const* true_group{
+          true_group_id ? &enum_def.template item<Group<E>>(true_group_id) : nullptr
+        };
+        auto const* false_group{
+          false_group_id ? &enum_def.template item<Group<E>>(false_group_id) : nullptr
+        };
+        auto const* if_group{ true_group };
+        auto const* else_group{ false_group };
+
+        auto if_opcode{ eEnumCommand::GroupIf };
+        if (true_group && true_group->has_only_one_Numeric(enum_def)) {
+          if_group = true_group;
+          else_group = false_group;
+          if_opcode = eEnumCommand::GroupIfNumeric;
+        } else if (false_group && false_group->has_only_one_Numeric(enum_def)) {
+          if_group = false_group;
+          else_group = true_group;
+          if_opcode = (eEnumCommand::GroupIfNumeric | eEnumCommand::fNegate);
+        } else if (true_group && true_group->has_only_one_Named_with_no_bitmask(enum_def)) {
+          if_group = true_group;
+          else_group = false_group;
+          if_opcode = eEnumCommand::GroupIfNamed;
+        }
+
+        assert(if_group || !"Conditional requires a true group unless the false group can inline as negated numeric.");
+
+        // A GroupIfNamed branch still stores its payload as Group -> Cmds -> Named.
+        // This helper unwraps that single command after the branch-shape checks above
+        // have already proven the group is exactly one unmasked Named command.
+        auto const inline_named_command = [&](Group<E> const& branch_group) -> Named<E> const& {
+          auto const& cmds{ enum_def.template item<Cmds<E>>(branch_group.cmds_id) };
+          auto const* named{ enum_def.template item_if<Named<E>>(cmds.command_id) };
+          assert(named || !"Inline named group must reference a Named command.");
+          assert(!named->has_mask || !"Inline named group must be unmasked.");
+          return *named;
+        };
+
+        // A GroupIfNumeric branch is stored the same way: Group -> Cmds -> Numeric.
+        // This helper unwraps that one Numeric command so encode() can emit it inline
+        // instead of treating the branch as a command block.
+        auto const inline_numeric_command = [&](Group<E> const& branch_group) -> Numeric<E> const& {
+          auto const& cmds{ enum_def.template item<Cmds<E>>(branch_group.cmds_id) };
+          auto const* numeric{ enum_def.template item_if<Numeric<E>>(cmds.command_id) };
+          assert(numeric || !"Inline numeric group must reference a Numeric command.");
+          return *numeric;
+        };
+
+        auto if_opcode_with_flags {
+          if_group && if_group->name_id
+          ? if_opcode | eEnumCommand::fHasGroupName
+          : if_opcode
+        };
         
-        (void)pc;
-        (void)new_ec;
-        (void)group_bitmask;
-        (void)true_group_id;
-        (void)false_group_id;
+
+        // EMITTING IF AND MASKS
+        program_cursor_t const if_pc { ec.reserve_byte() };
+        ec.encode_int(group_bitmask, ec.scope_bitmask());
+        ec.encode_int(bitmask, ec.scope_bitmask());
+        if (if_group->name_id) {
+          ec.encode_string(if_group->name_id);
+        }
+        
+        
+        // EMITTING IF BLOCK
+        auto if_ec { ec };
+        if_ec.set_scope_bitmask(bitmask);
+
+        if (if_opcode == eEnumCommand::GroupIf) {
+          size_t const stored {
+            encode_block(if_ec, eBlockType::IfCmd,
+              [&](auto& child_ec) {
+                child_ec.template item<Cmds<E>>(if_group->cmds_id).encode(child_ec);
+              })
+            };
+          ec.or_byte_at(if_pc, stored);
+        } else if (if_opcode == eEnumCommand::GroupIfNamed) {
+          size_t const stored { inline_named_command(*if_group).encode_body(if_ec, eBlockType::IfPair) };
+          ec.or_byte_at(if_pc, stored);
+        } else {
+          eEnumCommand const format { inline_numeric_command(*if_group).encode_inline_body(if_ec) };
+          if_opcode_with_flags |= format;
+        }
+        ec.or_byte_at(if_pc, if_opcode_with_flags);
+
+
+        // EMITTING ELSE BLOCK
+        if (!else_group) {
+          return;
+        }
+
+        auto else_opcode{ eEnumCommand::Else };
+        program_cursor_t const else_pc { ec.reserve_byte() };
+
+        if (else_group->name_id) {
+          ec.encode_string(else_group->name_id);
+          else_opcode |= eEnumCommand::fHasGroupName;
+        }
+
+        auto else_ec { ec };
+        else_ec.set_scope_bitmask(bitmask);
+
+        if (else_group->has_only_one_Named_with_no_bitmask(enum_def)) {
+          size_t const stored {
+            inline_named_command(*else_group).encode_body(else_ec, eBlockType::ElsePair)
+          };
+          ec.or_byte_at(else_pc, stored);
+        } else {
+          else_opcode |= eEnumCommand::fElseCmds;
+          size_t const stored {
+            encode_block(else_ec, eBlockType::ElseCmd,
+              [&](auto& child_ec) {
+                child_ec.template item<Cmds<E>>(else_group->cmds_id).encode(child_ec);
+              })
+          };
+          ec.or_byte_at(else_pc, stored);
+        }
+        ec.or_byte_at(else_pc, else_opcode);
       }
     };
 
@@ -1056,6 +1158,26 @@ namespace Constexpr {
       item_id_t command_id{};
       item_id_t next_id{};
 
+      private:
+      /**
+       * @brief Encodes the current stored command node.
+       *
+       * @tparam EnumT - Referenced enum representation type.
+       * @param ec - Active encoder for the current scope.
+       */
+      template <typename EnumT>
+      constexpr void encode_current(EnumEncoder<EnumT>& ec) const {
+        // TODO: Make this into ec.template item_if call
+        auto const dispatch_current = overload{
+          [&ec](Named<E> const&       cmd) { cmd.encode(ec); },
+          [&ec](Numeric<E> const&     cmd) { cmd.encode(ec); },
+          [&ec](Conditional<E> const& cmd) { cmd.encode(ec); },
+          [](auto const&) { assert(false && !"Command list must reference a command item."); },
+        };
+        std::visit(dispatch_current, ec.item(command_id));
+      }
+
+    public:
       /**
        * @brief Encodes this command-list node and any following sibling commands.
        *
@@ -1064,22 +1186,17 @@ namespace Constexpr {
        */
       template <typename EnumT>
       constexpr void encode(EnumEncoder<EnumT>& ec) const {
-        auto const dispatch_current = overload{
-          [&ec](Named<E> const&       cmd) { cmd.encode(ec); },
-          [&ec](Numeric<E> const&     cmd) { cmd.encode(ec); },
-          [&ec](Conditional<E> const& cmd) { cmd.encode(ec); },
-          [](auto const&) { assert(false && !"Command list must reference a command item."); },
-        };
-
         if (ec.remaining_items_allowed_in_block() < 0) {
-          std::visit(dispatch_current, ec.item(command_id));
+          encode_current(ec);
         } else if (ec.remaining_items_allowed_in_block() > 0) {
           ec.remaining_items_allowed_in_block() -= 1;
-          std::visit(dispatch_current, ec.item(command_id));
+          encode_current(ec);
         } else {
-          program_cursor_t pc =
-            encode_block(ec, eBlockType::ContCmd, [&](auto& new_ec) { encode(new_ec); });
+          program_cursor_t pc { ec.reserve_byte() };
+          size_t stored {
+            encode_block(ec, eBlockType::ContCmd, [&](auto& new_ec) { encode(new_ec); }) };
           ec.or_byte_at(pc, eEnumCommand::ContinueScope);
+          ec.or_byte_at(pc, stored);
           return;
         }
 
@@ -1089,104 +1206,6 @@ namespace Constexpr {
       }
     };
 
-    struct ConditionalEncodingPlan {
-      item_id_t inline_group_id{};
-      item_id_t else_group_id{};
-      eEnumCommand if_opcode{};
-      eEnumCommand else_opcode{};
-      bool has_else_branch{};
-    };
-
-    /**
-     * @brief Classifies a stored group by how a conditional can encode it.
-     *
-     * @tparam Settings - Encoding-context settings type.
-     * @tparam E - Enum value type used by the stored items.
-     * @param ec - Encoding context that owns the group item.
-     * @param group_id - Group id to classify. Zero means the branch is absent.
-     * @return eGroupEncodingForm - Conditional encoding form for the branch.
-     */
-    template <typename EnumT, typename E = typename EnumT::value_type>
-    constexpr eGroupEncodingForm classify_group_encoding_form(
-      EnumT const& enum_def, item_id_t group_id)
-    {
-      if (!group_id) {
-        return eGroupEncodingForm::None;
-      }
-      return enum_def.template item<Group<E>>(group_id).encoding_form(enum_def);
-    }
-
-    /**
-     * @brief Chooses the conditional opcodes that implement the documented branch-selection rules.
-     *
-     * @param true_form - Encoding form available for the true branch.
-     * @param true_group_id - Item id for the true branch group.
-     * @param false_form - Encoding form available for the false branch.
-     * @param false_group_id - Item id for the false branch group.
-     * @return ConditionalEncodingPlan - Selected inline/else groups and opcodes.
-     */
-    constexpr ConditionalEncodingPlan make_conditional_encoding_plan(
-      eGroupEncodingForm true_form,
-      item_id_t true_group_id,
-      eGroupEncodingForm false_form,
-      item_id_t false_group_id)
-    {
-      ConditionalEncodingPlan plan{};
-
-      if (true_form == eGroupEncodingForm::Numeric) {
-        plan.inline_group_id = true_group_id;
-        plan.else_group_id = false_group_id;
-        plan.if_opcode = eEnumCommand::GroupIfNumeric;
-      } else if (false_form == eGroupEncodingForm::Numeric) {
-        plan.inline_group_id = false_group_id;
-        plan.else_group_id = true_group_id;
-        plan.if_opcode = (eEnumCommand::GroupIfNumeric | eEnumCommand::fNegate);
-      } else if (true_form == eGroupEncodingForm::NamedPairs) {
-        plan.inline_group_id = true_group_id;
-        plan.else_group_id = false_group_id;
-        plan.if_opcode = eEnumCommand::GroupIfNamed;
-      } else {
-        plan.inline_group_id = true_group_id;
-        plan.else_group_id = false_group_id;
-        plan.if_opcode = eEnumCommand::GroupIf;
-      }
-
-      eGroupEncodingForm const else_form {
-        plan.inline_group_id == true_group_id ? false_form : true_form
-      };
-      if (else_form != eGroupEncodingForm::None) {
-        plan.has_else_branch = true;
-        plan.else_opcode = eEnumCommand::Else;
-        if (else_form != eGroupEncodingForm::NamedPairs) {
-          plan.else_opcode = (plan.else_opcode | eEnumCommand::fElseCmds);
-        }
-      }
-
-      return plan;
-    }
-
-    /**
-     * @brief Chooses the conditional opcodes for two stored groups.
-     *
-     * @tparam Settings - Encoding-context settings type.
-     * @tparam E - Enum value type used by the stored items.
-     * @param ec - Encoding context that owns the referenced groups.
-     * @param true_group_id - Item id for the true branch group.
-     * @param false_group_id - Item id for the false branch group.
-     * @return ConditionalEncodingPlan - Selected inline/else groups and opcodes.
-     */
-    template <typename EnumT>
-    constexpr ConditionalEncodingPlan make_conditional_encoding_plan(
-      EnumT const& enum_def, item_id_t true_group_id, item_id_t false_group_id)
-    {
-      return make_conditional_encoding_plan(
-        classify_group_encoding_form(enum_def, true_group_id),
-        true_group_id,
-        classify_group_encoding_form(enum_def, false_group_id),
-        false_group_id);
-    }
-
-
-  }
+  } // namespace impl
 
 } // namespace Constexpr
