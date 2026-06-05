@@ -104,6 +104,7 @@ if(DINT_BUILD_TESTS)
     tests/test_machine_num.cpp
     tests/test_constexpr_string_view.cpp
     tests/test_constexpr_string.cpp
+    tests/test_heap.cpp
     tests/test_masked_bits.cpp
     tests/test_enum_spec.cpp
   )
