@@ -139,7 +139,7 @@ So the intended shape is closer to `IfScope<Parent>` and `ElseScope<Parent>` tha
 
 The examples in this section describe the intended builder-facing API for enum
 descriptions. The currently tested low-level stream representation and encoder
-live in `constexpr/enum_spec.hpp`; these examples are design-level usage, not a
+live in `constexpr/enum.hpp`; these examples are design-level usage, not a
 guarantee that this exact front-end surface is available in the current build.
 
 Simple:
