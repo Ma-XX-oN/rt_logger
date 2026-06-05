@@ -1,4 +1,29 @@
-# Enum Definition Stream
+# Enum Stream Definition <!-- omit in toc -->
+
+- [Purpose](#purpose)
+- [Stream Overview](#stream-overview)
+- [API Direction](#api-direction)
+  - [Builder Shape](#builder-shape)
+  - [Builder States](#builder-states)
+  - [Parent-Typed Nesting](#parent-typed-nesting)
+- [Potential Usage Examples](#potential-usage-examples)
+- [Enum Stream Specification](#enum-stream-specification)
+- [Possible Render Mechanism](#possible-render-mechanism)
+
+## Purpose
+
+This document is the authoritative design note for the enum-description subsystem.
+
+It records:
+
+- the public API direction for enum description and encoding
+- the intended builder shape and builder-state model
+- the enum definition stream wire format and its execution rules
+- the rendering model that interprets a stored enum stream against a value
+
+`README.md` keeps only the project-level overview and links here when enum-specific detail is needed.
+
+## Stream Overview
 
 ```c++
 enum eEnumStorageType : std::uint8_t {
@@ -58,6 +83,57 @@ enum eEnumCommand : std::uint8_t {
    // GroupIfNumeric also can take fRightShiftBits, fPackedBits, fIsSigned and fHasGroupName flags.
 };
 ```
+
+## API Direction
+
+The accepted API direction for enum descriptions is:
+
+- `Constexpr::Enum<Settings>` is the public immutable representation type.
+- `string_id_t` and `item_id_t` are public storage ids in `Constexpr`, defined with the storage layer rather than inside
+  enum-encoding internals.
+- The encoding path is split into three roles:
+  - `Enum` for immutable representation storage
+  - `ProgramWriter` for the writable byte sink
+  - `EnumEncoder` for one encoding pass over an `Enum` into a `ProgramWriter`
+- Stored enum items continue to own their `encode(...)` member functions. Scope-introducing block logic remains in a
+  free helper instead of being spread across ad-hoc policy objects.
+
+### Builder Shape
+
+The builder direction is typed chaining rather than lambdas or variadic free-item factories.
+
+Reasons:
+
+- chaining keeps builder operations scoped on the builder object, which avoids namespace-lookup friction for helpers
+  such as `Name`, `Number`, `If`, and `Else`
+- chaining reads naturally for a declarative enum-description DSL
+- state-typed chaining allows IntelliSense to expose only valid next operations
+
+### Builder States
+
+The accepted builder-state model is:
+
+- `GlobalScope`
+  - allows `If`, `IfNot`, `Named`, and `Numeric`
+- `IfScope<Parent>`
+  - allows `If`, `IfNot`, `Named`, `Numeric`, `Else`, and `End`
+- `ElseScope<Parent>`
+  - allows `If`, `IfNot`, `Named`, `Numeric`, and `End`
+  - does not allow `Else`
+
+`ElseScope` is separate because the presence of `Else` changes what operations are valid.
+
+### Parent-Typed Nesting
+
+Builder nesting is parent-typed rather than depth-typed.
+
+That means:
+
+- `End()` returns the exact parent scope type
+- the builder models structural nesting directly instead of only tracking a numeric level
+- a global builder state is an API concept, not a stored `Global` node in the enum representation
+
+So the intended shape is closer to `IfScope<Parent>` and `ElseScope<Parent>` than to `IfScope<N>` or `ElseScope<N>`.
 
 ## Potential Usage Examples
 
