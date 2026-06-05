@@ -135,6 +135,22 @@ That means:
 
 So the intended shape is closer to `IfScope<Parent>` and `ElseScope<Parent>` than to `IfScope<N>` or `ElseScope<N>`.
 
+### Future Enhancements
+
+One accepted future enhancement is richer numeric output formatting without widening the common `Numeric` command form.
+
+For plain `Numeric`, the remaining two format bits may be used as a compact numeric display mode:
+
+- `0` = decimal
+- `1` = hex
+- `2` = hex with prefix
+- `3` = extended-format-byte follows
+
+`GroupIfNumeric` stays the restricted compact inline form for simple decimal numeric output only.
+
+If a conditional numeric branch needs any non-default numeric presentation, it should not use `GroupIfNumeric`. It
+should encode as `GroupIf` with a normal `Numeric` command inside the branch instead.
+
 ## Potential Usage Examples
 
 The examples in this section describe the intended builder-facing API for enum
@@ -149,10 +165,9 @@ enum eTest : std::uint8_t {
   nothing, something
 };
 constexpr auto eDisc = build_enum_description<eTest>()
-  .NameStart()
-    .Name(eTest::nothing, "NOTHING")      // named value
-    .Name(eTest::something, "Something") // another named value
-  .End();
+  .Named(eTest::nothing, "NOTHING")       // named value
+  .Named(eTest::something, "Something")   // another named value
+  .Build();
 
 auto eValue = eDisc.value(eDisc["NOTHING"]);
 
@@ -185,14 +200,15 @@ enum eTest : std::uint8_t {
   group2 = 0x80, mask = 0x7f
 };
 constexpr auto eDisc = build_enum_description<eTest>()
-  .NameIfNot(eTest::group2, eTest::mask)
-    .Name(eTest::nothing, "NOTHING")
-    .Name(eTest::something, "Something")
+  .IfNot(eTest::group2, eTest::mask)
+    .Named(eTest::nothing, "NOTHING")
+    .Named(eTest::something, "Something")
   .Else()
-    .Name(eTest::hello, "hello")
-    .Name(eTest::goodbye, "goodbye")
-    .Number("value")
-  .End();
+    .Named(eTest::hello, "hello")
+    .Named(eTest::goodbye, "goodbye")
+    .Numeric(eTest::mask, "value")
+  .End()
+  .Build();
 
 // Using enums to get and set named values is unsafe when working with groups.
 // Consider:
@@ -228,14 +244,15 @@ enum eTest : std::uint8_t {
   group2 = 0x80, mask = 0x7f
 };
 auto eDisc = build_enum_description<eTest>()
-  .NameIfNot(eTest::group2, "group1")
-    .Name(eTest::nothing, "NOTHING")
-    .Name(eTest::something, "Something")
+  .IfNot(eTest::group2, eTest::mask, "group1")
+    .Named(eTest::nothing, "NOTHING")
+    .Named(eTest::something, "Something")
   .Else("group2")
-    .Name(eTest::hello, "hello")
-    .Name(eTest::goodbye, "goodbye")
-    .Number("value")
-  .End();
+    .Named(eTest::hello, "hello")
+    .Named(eTest::goodbye, "goodbye")
+    .Numeric(eTest::mask, "value")
+  .End()
+  .Build();
 auto eValue = eDisc.value(eDisc["goodbye"]);
 
 eValue = set(eDisc["NOTHING"]);                // ok because bit 7 is 0
@@ -254,10 +271,9 @@ Don't actually need an enum:
 
 ```cpp
 auto eDisc = build_enum_description<std::int8_t>()
-  .NameStart()
-    .Name(0, "NOTHING")
-    .Name(1, "Something")
-  .End();
+  .Named(0, "NOTHING")
+  .Named(1, "Something")
+  .Build();
 
 auto eValue = eDisc.value(); // zero initialised
 auto eText = eValue.to_string();

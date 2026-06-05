@@ -3,6 +3,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -39,8 +42,8 @@ constexpr bool builder_build_materializes_constexpr_enum{
   [] {
     constexpr auto enum_def{
       Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<int>>()
-        .Name(TestEnum{ 0x01u }, "one")
-        .Name(TestEnum{ 0x02u }, "two")
+        .Named(TestEnum{ 0x01u }, "one")
+        .Named(TestEnum{ 0x02u }, "two")
         .Build()
     };
 
@@ -57,8 +60,8 @@ constexpr bool build_enum_macro_materializes_constexpr_enum{
   [] {
     constexpr auto enum_def{
       BUILD_ENUM_DESCRIPTION(TestEnum,
-        .Name(TestEnum{ 0x01u }, "one")
-        .Name(TestEnum{ 0x02u }, "two"))
+        .Named(TestEnum{ 0x01u }, "one")
+        .Named(TestEnum{ 0x02u }, "two"))
     };
 
     static_assert(sizeof(enum_def) == 88);  // assumes 8 byte alignment
@@ -73,6 +76,19 @@ static_assert(build_enum_macro_materializes_constexpr_enum);
 
 // Fixture-building helpers create stored group shapes that the runtime tests
 // can classify without manually assembling ids inline in each case.
+
+/**
+ * @brief Streams one rendered enum value into a standard string.
+ *
+ * @param enum_def - Immutable enum description.
+ * @param value - Runtime value to render.
+ * @return std::string - Rendered output text.
+ */
+std::string render_enum(TestEnumDef const& enum_def, TestEnum value) {
+  std::ostringstream stream{};
+  stream << enum_def(value);
+  return stream.str();
+}
 
 /**
  * @brief Stores one pair node for a named branch.
@@ -506,11 +522,11 @@ TEST(EnumSpecEncoding, ConditionalCommandBranchCountsStoredCommandsNotPairContin
 
 TEST(EnumSpecBuilder, BuildsRootNamedListAndStoresCmdsId)
 {
-  // Repeated Name() calls in one command scope should reuse the same implicit Named command and root Cmds anchor.
+  // Repeated Named() calls in one command scope should reuse the same implicit Named command and root Cmds anchor.
   TestEnumDef const enum_def{
     Constexpr::build_enum_description<TestSettings>()
-      .Name(TestEnum{ 0x01u }, "one")
-      .Name(TestEnum{ 0x02u }, "two")
+      .Named(TestEnum{ 0x01u }, "one")
+      .Named(TestEnum{ 0x02u }, "two")
       .Build()
   };
 
@@ -538,9 +554,9 @@ TEST(EnumSpecBuilder, BuildsConditionalBranchesThroughTypedScopes)
   TestEnumDef const enum_def{
     Constexpr::build_enum_description<TestSettings>()
       .IfNot(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
-        .Name(TestEnum{ 0x01u }, "one")
+        .Named(TestEnum{ 0x01u }, "one")
       .Else("elseg")
-        .Number(TestEnum{ 0x0Fu }, "bits")
+        .Numeric(TestEnum{ 0x0Fu }, "bits")
       .End()
       .Build()
   };
@@ -569,6 +585,233 @@ TEST(EnumSpecBuilder, BuildsConditionalBranchesThroughTypedScopes)
   auto const& else_numeric{ enum_def.item<TestNumeric>(else_cmds.command_id) };
   EXPECT_EQ(else_numeric.mask, 0x0Fu);
   EXPECT_EQ(enum_def.get_string(else_numeric.name_id), "bits");
+}
+
+TEST(EnumSpecRender, RendersNonzeroNamedCountsWithoutExtraSeparators)
+{
+  // Zero matching non-zero named items should render nothing.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "");
+  }
+
+  // One matching non-zero named item should render without any separator noise.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Named(TestEnum{ 0x01u }, "A", TestEnum{ 0x01u })
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x01u }), "A");
+  }
+
+  // Two matching non-zero named items should render with exactly one vertical-bar separator.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Named(TestEnum{ 0x01u }, "A", TestEnum{ 0x01u })
+        .Named(TestEnum{ 0x02u }, "B", TestEnum{ 0x02u })
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x03u }), "A | B");
+  }
+}
+
+TEST(EnumSpecRender, RendersZeroNamedCountsWithoutExtraSeparators)
+{
+  // Zero matching zero-valued named items should render nothing.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x0Cu })
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x04u }), "");
+  }
+
+  // One matching zero-valued named item should render without any separator noise.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x0Cu })
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "D");
+  }
+
+  // Two matching zero-valued named items should render with exactly one comma separator.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x0Cu })
+        .Named(TestEnum{ 0x00u }, "E", TestEnum{ 0x30u })
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "D, E");
+  }
+}
+
+TEST(EnumSpecRender, RendersNumericCountsWithoutExtraSeparators)
+{
+  // Zero numeric items should render nothing.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "");
+  }
+
+  // One numeric item should render without any separator noise.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Numeric(TestEnum{ 0x30u }, "F", eEnumCommand::fRightShiftBits)
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x10u }), "F=1");
+  }
+
+  // Two numeric items should render with exactly one comma separator.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Numeric(TestEnum{ 0x30u }, "F", eEnumCommand::fRightShiftBits)
+        .Numeric(TestEnum{ 0xC0u }, "G", eEnumCommand::fRightShiftBits)
+        .Build()
+    };
+
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x90u }), "F=1, G=2");
+  }
+}
+
+TEST(EnumSpecRender, RightShiftBitsPreservesSparseBitGapsWhilePackedBitsCondenseThem)
+{
+  // RightShiftBits should move the selected field to bit zero without packing away the zeros between sparse mask bits.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .Numeric(TestEnum{ 0x0Au }, "shifted", eEnumCommand::fRightShiftBits)
+      .Numeric(TestEnum{ 0x0Au }, "packed", eEnumCommand::fPackedBits)
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x0Au }), "shifted=5, packed=3");
+}
+
+TEST(EnumSpecRender, SignExtendsPlainShiftedAndPackedNumericFields)
+{
+  // Signed numeric rendering should extend the extracted sign bit after plain masking, right shifting, or sparse-bit packing.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .Numeric(TestEnum{ 0x30u }, "plain", eEnumCommand::fIsSigned)
+      .Numeric(TestEnum{ 0x30u }, "shifted", eEnumCommand::fIsSigned | eEnumCommand::fRightShiftBits)
+      .Numeric(TestEnum{ 0x0Au }, "packed", eEnumCommand::fIsSigned | eEnumCommand::fPackedBits)
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x10u }), "plain=16, shifted=1, packed=0");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x38u }), "plain=-16, shifted=-1, packed=-2");
+}
+
+TEST(EnumSpecRender, ProducesExpectedNamedOutputsAcrossValuesZeroThroughFour)
+{
+  // One named group with zero and one-bit alternatives should produce the expected text for each value from 0 through 4.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x07u })
+      .Named(TestEnum{ 0x01u }, "A", TestEnum{ 0x01u })
+      .Named(TestEnum{ 0x02u }, "B", TestEnum{ 0x02u })
+      .Named(TestEnum{ 0x04u }, "C", TestEnum{ 0x04u })
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "D");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x01u }), "A");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x02u }), "B");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x03u }), "A | B");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x04u }), "C");
+}
+
+TEST(EnumSpecRender, OrdersNamedAndNumericBucketsWithoutExtraCrossSeparators)
+{
+  // Matching non-zero names should come first, then zero-valued names, then numeric items.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .Named(TestEnum{ 0x01u }, "A", TestEnum{ 0x01u })
+      .Named(TestEnum{ 0x02u }, "B", TestEnum{ 0x02u })
+      .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x08u })
+      .Named(TestEnum{ 0x00u }, "E", TestEnum{ 0x04u })
+      .Numeric(TestEnum{ 0x30u }, "F", eEnumCommand::fRightShiftBits)
+      .Numeric(TestEnum{ 0xC0u }, "G", eEnumCommand::fRightShiftBits)
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x93u }), "A | B, D, E, F=1, G=2");
+}
+
+TEST(EnumSpecRender, RendersConditionalGroupsUsingSharedScopeBitmask)
+{
+  // Conditional groups should pick the active branch and evaluate unmasked Named items as exact values within the branch scope bitmask.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
+        .Named(TestEnum{ 0x01u }, "if-one")
+        .Named(TestEnum{ 0x02u }, "if-two")
+      .Else("elseg")
+        .Named(TestEnum{ 0x00u }, "else-zero")
+        .Named(TestEnum{ 0x01u }, "else-one")
+        .Named(TestEnum{ 0x04u }, "else-four")
+      .End()
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x81u }), "if-one");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x82u }), "if-two");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "else-zero");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x01u }), "else-one");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x04u }), "else-four");
+}
+
+TEST(EnumSpecRender, MergesConditionalGroupOutputWithoutRenderingGroupNames)
+{
+  // Group contents should merge into the shared output buckets while the stored group labels stay invisible in rendered text.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .Named(TestEnum{ 0x40u }, "ROOT", TestEnum{ 0x40u })
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
+        .Named(TestEnum{ 0x01u }, "IF")
+        .Numeric(TestEnum{ 0x30u }, "bits", eEnumCommand::fRightShiftBits)
+      .Else("elseg")
+        .Named(TestEnum{ 0x00u }, "ELSE")
+      .End()
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0xD1u }), "ROOT | IF, bits=1");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x40u }), "ROOT, ELSE");
+}
+
+TEST(EnumSpecBuilder, RejectsDuplicateNamedValuesWithinOneMaskedGroup)
+{
+  // Reusing one masked enum value inside the same Named block should be rejected instead of producing two names.
+  EXPECT_THROW(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x0Cu })
+      .Named(TestEnum{ 0x00u }, "E", TestEnum{ 0x0Cu })
+      .Build(),
+    std::invalid_argument
+  );
 }
 
 } // namespace

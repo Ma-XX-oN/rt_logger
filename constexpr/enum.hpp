@@ -17,6 +17,10 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstdint>
+#include <limits>
+#include <ostream>
+#include <stdexcept>
+#include <string>
 #include <variant>
 #include <string_view>
 #include <type_traits>
@@ -176,6 +180,9 @@ struct BitwiseOps<Constexpr::eEnumCommand> : std::true_type {};
 // using E = std::int8_t;
 
 namespace Constexpr {
+
+  template <typename EnumT>
+  class EnumValueView;
 
   constexpr std::uint32_t reserve_space(std::uint16_t string_space, std::uint16_t item_space) {
     return static_cast<std::uint32_t>(string_space) | (static_cast<std::uint32_t>(item_space) << 16);
@@ -1104,6 +1111,324 @@ namespace Constexpr {
       }
     };
 
+    /**
+     * @brief Finds the index of the most significant set bit.
+     *
+     * @tparam E - Enum or integral type of \p mask.
+     * @param mask - Mask value with at least one set bit.
+     * @return std::size_t - Zero-based bit index of the highest set bit.
+     */
+    template <typename E>
+    constexpr std::size_t most_set_bit_index(E mask) {
+      auto mask_value{ make_unsigned_equivalent(mask) };
+      assert(mask_value || !"mask must not be 0.");
+      std::size_t index{};
+      while (mask_value >>= 1u) {
+        ++index;
+      }
+      return index;
+    }
+
+    /**
+     * @brief Counts how many bits are set in a mask.
+     *
+     * @tparam E - Enum or integral type of \p mask.
+     * @param mask - Mask value.
+     * @return std::size_t - Number of set bits in \p mask.
+     */
+    template <typename E>
+    constexpr std::size_t set_bit_count(E mask) {
+      auto mask_value{ make_unsigned_equivalent(mask) };
+      std::size_t count{};
+      while (mask_value) {
+        count += static_cast<std::size_t>(mask_value & 1u);
+        mask_value >>= 1u;
+      }
+      return count;
+    }
+
+    /**
+     * @brief Sign-extends a bit field whose sign bit index is already known.
+     *
+     * @tparam UInt - Unsigned integer type holding the bit field.
+     * @param value - Unsigned value to extend.
+     * @param sign_bit_index - Zero-based position of the sign bit.
+     * @return std::make_signed_t<UInt> - Sign-extended signed result.
+     */
+    template <typename UInt>
+    constexpr std::make_signed_t<UInt> sign_extend(UInt value, std::size_t sign_bit_index) {
+      static_assert(std::is_unsigned_v<UInt>, "sign_extend requires an unsigned integer type.");
+
+      std::size_t const digits{ std::numeric_limits<UInt>::digits };
+      std::size_t const width{ sign_bit_index + 1u };
+      UInt const sign_bit{ static_cast<UInt>(UInt{ 1u } << sign_bit_index) };
+      if ((value & sign_bit) == 0u) {
+        return static_cast<std::make_signed_t<UInt>>(value);
+      }
+
+      UInt const width_mask{
+        width >= digits
+          ? static_cast<UInt>(~UInt{})
+          : static_cast<UInt>((UInt{ 1u } << width) - 1u)
+      };
+      return static_cast<std::make_signed_t<UInt>>(value | static_cast<UInt>(~width_mask));
+    }
+
+    /**
+     * @brief Renders one enum description plus runtime value into output text.
+     *
+     * @tparam EnumT - Immutable enum description type.
+     */
+    template <typename EnumT>
+    class EnumTextRenderer {
+      using value_type = typename EnumT::value_type;
+      using unsigned_value_type = unsigned_equivalent_t<value_type>;
+
+      EnumT const* m_enum{};
+      value_type m_value{};
+      std::string m_nonzero_items{};
+      std::string m_zero_items{};
+      std::string m_numeric_items{};
+      bool m_has_nonzero_items{};
+      bool m_has_zero_items{};
+      bool m_has_numeric_items{};
+
+      /**
+       * @brief Appends one delimited item into a text bucket.
+       *
+       * @param bucket - Destination bucket text.
+       * @param has_items - Whether the bucket already has earlier items.
+       * @param separator - Separator for every item after the first.
+       * @param item - Item text to append.
+       */
+      static void append_bucket_item(
+        std::string& bucket,
+        bool& has_items,
+        std::string_view separator,
+        std::string_view item)
+      {
+        if (has_items) {
+          bucket.append(separator.data(), separator.size());
+        }
+        bucket.append(item.data(), item.size());
+        has_items = true;
+      }
+
+      /**
+       * @brief Returns the root-scope bitmask with every bit enabled.
+       *
+       * @return value_type - All-bits-set scope bitmask for \c value_type.
+       */
+      static constexpr value_type full_scope_bitmask() noexcept {
+        return static_cast<value_type>(static_cast<unsigned_value_type>(~unsigned_value_type{}));
+      }
+
+      /**
+       * @brief Appends one named output to the zero or non-zero bucket.
+       *
+       * @param name - Display name to append.
+       * @param is_zero_value - Whether the matching pair stored enum value 0.
+       */
+      void append_named_item(std::string_view name, bool is_zero_value) {
+        if (is_zero_value) {
+          append_bucket_item(m_zero_items, m_has_zero_items, ", ", name);
+          return;
+        }
+        append_bucket_item(m_nonzero_items, m_has_nonzero_items, " | ", name);
+      }
+
+      /**
+       * @brief Appends one numeric output item.
+       *
+       * @param name - Numeric field label.
+       * @param rendered_value - Already formatted numeric value text.
+       */
+      void append_numeric_item(std::string_view name, std::string const& rendered_value) {
+        std::string item{};
+        item.reserve(name.size() + 1u + rendered_value.size());
+        item.append(name.data(), name.size());
+        item.push_back('=');
+        item.append(rendered_value);
+        append_bucket_item(m_numeric_items, m_has_numeric_items, ", ", item);
+      }
+
+      /**
+       * @brief Formats one numeric command using the documented extraction flags.
+       *
+       * @param numeric - Numeric command to evaluate.
+       * @return std::string - Decimal text for the extracted numeric value.
+       */
+      std::string format_numeric_value(Numeric<value_type> const& numeric) const {
+        unsigned_value_type const raw_value{ make_unsigned_equivalent(m_value) };
+        unsigned_value_type const mask{ make_unsigned_equivalent(numeric.mask) };
+        unsigned_value_type const masked_value{ static_cast<unsigned_value_type>(raw_value & mask) };
+        bool const packed_bits{ (numeric.format & eEnumCommand::fPackedBits) != 0 };
+        bool const shifted_bits{ (numeric.format & eEnumCommand::fRightShiftBits) != 0 };
+        bool const is_signed{ (numeric.format & eEnumCommand::fIsSigned) != 0 };
+
+        unsigned_value_type rendered_value{ masked_value };
+        std::size_t sign_bit_index{ most_set_bit_index(numeric.mask) };
+
+        if (packed_bits) {
+          rendered_value = make_unsigned_equivalent(condense(numeric.mask, m_value, true));
+          sign_bit_index = set_bit_count(numeric.mask) - 1u;
+        } else if (shifted_bits) {
+          std::size_t const least_bit{ least_set_bit_index(numeric.mask) };
+          rendered_value = static_cast<unsigned_value_type>(masked_value >> least_bit);
+          sign_bit_index -= least_bit;
+        }
+
+        if (is_signed) {
+          auto const signed_value{ sign_extend(rendered_value, sign_bit_index) };
+          return std::to_string(static_cast<long long>(signed_value));
+        }
+
+        return std::to_string(static_cast<unsigned long long>(rendered_value));
+      }
+
+      /**
+       * @brief Renders one named command against the active scope bitmask.
+       *
+       * @param named - Named command to evaluate.
+       * @param scope_bitmask - Active scope bitmask for the current command list.
+       */
+      void render_named(Named<value_type> const& named, value_type scope_bitmask) {
+        auto const effective_bitmask{
+          named.has_mask
+            ? make_unsigned_equivalent(named.mask)
+            : make_unsigned_equivalent(scope_bitmask)
+        };
+        auto const current_value{ make_unsigned_equivalent(m_value) };
+
+        for (item_id_t pair_id{ named.pairs_id }; pair_id != 0u;) {
+          auto const& pair{ m_enum->template item<Pairs<value_type>>(pair_id) };
+          if ((current_value & effective_bitmask) == make_unsigned_equivalent(pair.value)) {
+            append_named_item(m_enum->get_string(pair.name_id), pair.value == static_cast<value_type>(0));
+          }
+          pair_id = pair.next_pairs_id;
+        }
+      }
+
+      /**
+       * @brief Renders one numeric command.
+       *
+       * @param numeric - Numeric command to evaluate.
+       */
+      void render_numeric(Numeric<value_type> const& numeric) {
+        append_numeric_item(m_enum->get_string(numeric.name_id), format_numeric_value(numeric));
+      }
+
+      /**
+       * @brief Renders one stored group using a replacement scope bitmask.
+       *
+       * @param group_id - Stored group id.
+       * @param scope_bitmask - Scope bitmask applied inside the group.
+       */
+      void render_group(item_id_t group_id, value_type scope_bitmask) {
+        auto const& group{ m_enum->template item<Group<value_type>>(group_id) };
+        assert(group.cmds_id || !"Group must reference a command list.");
+        render_cmds(group.cmds_id, scope_bitmask);
+      }
+
+      /**
+       * @brief Renders one conditional command.
+       *
+       * @param conditional - Conditional command to evaluate.
+       * @param scope_bitmask - Parent scope bitmask. Present for signature symmetry.
+       */
+      void render_conditional(Conditional<value_type> const& conditional, value_type scope_bitmask) {
+        (void)scope_bitmask;
+
+        bool const condition_met{
+          (make_unsigned_equivalent(m_value) & make_unsigned_equivalent(conditional.group_bitmask)) != 0u
+        };
+        if (condition_met) {
+          if (conditional.true_group_id) {
+            render_group(conditional.true_group_id, conditional.bitmask);
+          }
+          return;
+        }
+
+        if (conditional.false_group_id) {
+          render_group(conditional.false_group_id, conditional.bitmask);
+        }
+      }
+
+      /**
+       * @brief Renders one linked list of stored command nodes.
+       *
+       * @param cmds_id - First command-list node id.
+       * @param scope_bitmask - Active scope bitmask for that command list.
+       */
+      void render_cmds(item_id_t cmds_id, value_type scope_bitmask) {
+        for (item_id_t current_cmds_id{ cmds_id }; current_cmds_id != 0u;) {
+          auto const& cmds{ m_enum->template item<Cmds<value_type>>(current_cmds_id) };
+          if (auto const* named{ m_enum->template item_if<Named<value_type>>(cmds.command_id) }) {
+            render_named(*named, scope_bitmask);
+          } else if (auto const* numeric{ m_enum->template item_if<Numeric<value_type>>(cmds.command_id) }) {
+            render_numeric(*numeric);
+          } else {
+            auto const* conditional{ m_enum->template item_if<Conditional<value_type>>(cmds.command_id) };
+            assert(conditional || !"Cmds must reference Named, Numeric or Conditional.");
+            render_conditional(*conditional, scope_bitmask);
+          }
+          current_cmds_id = cmds.next_id;
+        }
+      }
+
+      /**
+       * @brief Combines the named and numeric buckets into final output text.
+       *
+       * @return std::string - Final rendered text.
+       */
+      std::string combine_output() const {
+        std::string result{ m_nonzero_items };
+        bool has_output{ !result.empty() };
+
+        if (m_has_zero_items) {
+          if (has_output) {
+            result.append(", ");
+          }
+          result.append(m_zero_items);
+          has_output = true;
+        }
+
+        if (m_has_numeric_items) {
+          if (has_output) {
+            result.append(", ");
+          }
+          result.append(m_numeric_items);
+        }
+
+        return result;
+      }
+
+    public:
+      /**
+       * @brief Constructs a renderer for one enum description and runtime value.
+       *
+       * @param enum_def - Immutable enum description.
+       * @param value - Runtime value to interpret.
+       */
+      constexpr EnumTextRenderer(EnumT const& enum_def, value_type value) noexcept
+      : m_enum(&enum_def)
+      , m_value(value)
+      {
+      }
+
+      /**
+       * @brief Renders the full enum description into display text.
+       *
+       * @return std::string - Final rendered text.
+       */
+      std::string render() {
+        if (m_enum->cmds_id()) {
+          render_cmds(m_enum->cmds_id(), full_scope_bitmask());
+        }
+        return combine_output();
+      }
+    };
+
     /*
      * The builder was designed by me but made by Codex.  It's been a while
      * since I've done CRTP coding.
@@ -1119,10 +1444,9 @@ namespace Constexpr {
      *   
      *   CommandScopeFacade<Derived>
      *     provides fluent ops:
-     *       Name/Named
-     *       Number/Numeric
+     *       Named
+     *       Numeric
      *       If / IfNot
-     *       NameIf / NameIfNot
      *     calls back into Derived for:
      *       enum_ref()
      *       command_state()
@@ -1221,7 +1545,7 @@ namespace Constexpr {
        * @return auto - Updated command scope.
        */
       template <typename D = Derived>
-      constexpr auto Name(typename D::value_type value, std::string_view name) const {
+      constexpr auto Named(typename D::value_type value, std::string_view name) const {
         auto next{ derived() };
         next.append_named_pair_impl(false, typename D::value_type{}, value, name);
         return next;
@@ -1230,16 +1554,16 @@ namespace Constexpr {
       /**
        * @brief Add one named value under an explicit command-local bitmask.
        *
-       * @param bitmask - Command-local bitmask for the named block.
        * @param value - Masked enum value matched by the pair.
        * @param name - Display name for the pair.
+       * @param bitmask - Command-local bitmask for the named block.
        * @return auto - Updated command scope.
        */
       template <typename D = Derived>
-      constexpr auto Name(
-        typename D::value_type bitmask,
+      constexpr auto Named(
         typename D::value_type value,
-        std::string_view name) const
+        std::string_view name,
+        typename D::value_type bitmask) const
       {
         auto next{ derived() };
         next.append_named_pair_impl(true, bitmask, value, name);
@@ -1247,55 +1571,7 @@ namespace Constexpr {
       }
 
       /**
-       * @brief Alias for `Name(value, name)`.
-       *
-       * @param value - Enum value matched by the pair.
-       * @param name - Display name for the pair.
-       * @return auto - Updated command scope.
-       */
-      template <typename D = Derived>
-      constexpr auto Named(typename D::value_type value, std::string_view name) const {
-        return Name(value, name);
-      }
-
-      /**
-       * @brief Alias for `Name(bitmask, value, name)`.
-       *
-       * @param bitmask - Command-local bitmask for the named block.
-       * @param value - Masked enum value matched by the pair.
-       * @param name - Display name for the pair.
-       * @return auto - Updated command scope.
-       */
-      template <typename D = Derived>
-      constexpr auto Named(
-        typename D::value_type bitmask,
-        typename D::value_type value,
-        std::string_view name) const
-      {
-        return Name(bitmask, value, name);
-      }
-
-      /**
        * @brief Add one numeric command to the current command scope.
-       *
-       * @param bitmask - Bitmask selecting the numeric field.
-       * @param name - Display label for the numeric field.
-       * @param format - Numeric formatting flags.
-       * @return auto - Updated command scope.
-       */
-      template <typename D = Derived>
-      constexpr auto Number(
-        typename D::value_type bitmask,
-        std::string_view name,
-        eEnumCommand format = eEnumCommand{}) const
-      {
-        auto next{ derived() };
-        next.append_numeric_impl(bitmask, name, format);
-        return next;
-      }
-
-      /**
-       * @brief Alias for `Number(bitmask, name, format)`.
        *
        * @param bitmask - Bitmask selecting the numeric field.
        * @param name - Display label for the numeric field.
@@ -1308,7 +1584,9 @@ namespace Constexpr {
         std::string_view name,
         eEnumCommand format = eEnumCommand{}) const
       {
-        return Number(bitmask, name, format);
+        auto next{ derived() };
+        next.append_numeric_impl(bitmask, name, format);
+        return next;
       }
 
       /**
@@ -1381,70 +1659,6 @@ namespace Constexpr {
         return next.begin_if_impl(true, group_bitmask, scope_bitmask, group_name, true);
       }
 
-      /**
-       * @brief Alias for `If(group_bitmask, scope_bitmask)`.
-       *
-       * @param group_bitmask - Single-bit selector for the branch.
-       * @param scope_bitmask - Scope bitmask to apply inside the branch.
-       * @return IfScope<Derived> - Builder state for the if branch.
-       */
-      template <typename D = Derived>
-      constexpr auto NameIf(
-        typename D::value_type group_bitmask,
-        typename D::value_type scope_bitmask) const
-      {
-        return If(group_bitmask, scope_bitmask);
-      }
-
-      /**
-       * @brief Alias for `If(group_bitmask, scope_bitmask, group_name)`.
-       *
-       * @param group_bitmask - Single-bit selector for the branch.
-       * @param scope_bitmask - Scope bitmask to apply inside the branch.
-       * @param group_name - Group label for the if branch.
-       * @return IfScope<Derived> - Builder state for the if branch.
-       */
-      template <typename D = Derived>
-      constexpr auto NameIf(
-        typename D::value_type group_bitmask,
-        typename D::value_type scope_bitmask,
-        std::string_view group_name) const
-      {
-        return If(group_bitmask, scope_bitmask, group_name);
-      }
-
-      /**
-       * @brief Alias for `IfNot(group_bitmask, scope_bitmask)`.
-       *
-       * @param group_bitmask - Single-bit selector for the branch.
-       * @param scope_bitmask - Scope bitmask to apply inside the branch.
-       * @return IfScope<Derived> - Builder state for the first user-authored branch.
-       */
-      template <typename D = Derived>
-      constexpr auto NameIfNot(
-        typename D::value_type group_bitmask,
-        typename D::value_type scope_bitmask) const
-      {
-        return IfNot(group_bitmask, scope_bitmask);
-      }
-
-      /**
-       * @brief Alias for `IfNot(group_bitmask, scope_bitmask, group_name)`.
-       *
-       * @param group_bitmask - Single-bit selector for the branch.
-       * @param scope_bitmask - Scope bitmask to apply inside the branch.
-       * @param group_name - Group label for the first user-authored branch.
-       * @return IfScope<Derived> - Builder state for the first user-authored branch.
-       */
-      template <typename D = Derived>
-      constexpr auto NameIfNot(
-        typename D::value_type group_bitmask,
-        typename D::value_type scope_bitmask,
-        std::string_view group_name) const
-      {
-        return IfNot(group_bitmask, scope_bitmask, group_name);
-      }
-
     protected:
       /**
        * @brief Returns the concrete command-scope object.
@@ -1463,6 +1677,32 @@ namespace Constexpr {
       template <typename D = Derived>
       static constexpr void clear_implicit_named(D& scope) {
         scope.command_state().implicit_named = ImplicitNamedState<typename D::value_type>{};
+      }
+
+      /**
+       * @brief Verifies that one named block does not reuse the same masked value.
+       *
+       * @param scope - Command scope being updated.
+       * @param named_id - Stored named-command id being extended.
+       * @param value - Candidate masked enum value for the new pair.
+       * @throws std::invalid_argument if the named block already contains \p value.
+       */
+      template <typename D = Derived>
+      static constexpr void verify_unique_named_value(
+        D& scope,
+        item_id_t named_id,
+        typename D::value_type value)
+      {
+        auto& enum_def{ scope.enum_ref() };
+        auto const& named{ enum_def.template item<Constexpr::impl::Named<typename D::value_type>>(named_id) };
+
+        for (item_id_t pair_id{ named.pairs_id }; pair_id != 0u;) {
+          auto const& pair{ enum_def.template item<Pairs<typename D::value_type>>(pair_id) };
+          if (pair.value == value) {
+            throw std::invalid_argument("Named command cannot reuse the same masked enum value.");
+          }
+          pair_id = pair.next_pairs_id;
+        }
       }
 
       /**
@@ -1548,6 +1788,7 @@ namespace Constexpr {
         auto& enum_def{ scope.enum_ref() };
         auto& implicit{ scope.command_state().implicit_named };
         item_id_t const named_id{ ensure_named_target(scope, has_mask, bitmask) };
+        verify_unique_named_value(scope, named_id, value);
         string_id_t const name_id{ enum_def.add_string(name) };
         item_id_t const pair_id{ enum_def.add_item(Pairs<typename D::value_type>{ value, name_id, {} }) };
 
@@ -2092,7 +2333,93 @@ namespace Constexpr {
     constexpr auto const* item_if(item_id_t item_id) const {
       return items.template get_item_if<Item>(item_id);
     }
+
+    /**
+     * @brief Binds one runtime value to this enum description for rendering.
+     *
+     * @param enum_value - Runtime value to interpret.
+     * @return EnumValueView<Enum<Settings>> - Streamable render view.
+     */
+    constexpr EnumValueView<Enum<Settings>> value(value_type enum_value) const noexcept {
+      return EnumValueView<Enum<Settings>>{ *this, enum_value };
+    }
+
+    /**
+     * @brief Alias for `value(enum_value)`.
+     *
+     * @param enum_value - Runtime value to interpret.
+     * @return EnumValueView<Enum<Settings>> - Streamable render view.
+     */
+    constexpr EnumValueView<Enum<Settings>> operator()(value_type enum_value) const noexcept {
+      return value(enum_value);
+    }
   };
+
+  /**
+   * @brief Streamable render view for one enum description and runtime value.
+   *
+   * @tparam EnumT - Immutable enum description type.
+   */
+  template <typename EnumT>
+  class EnumValueView {
+    EnumT const* m_enum{};
+    typename EnumT::value_type m_value{};
+
+  public:
+    using value_type = typename EnumT::value_type;
+
+    /**
+     * @brief Constructs a render view for one enum description and runtime value.
+     *
+     * @param enum_def - Immutable enum description.
+     * @param value - Runtime value to interpret.
+     */
+    constexpr EnumValueView(EnumT const& enum_def, value_type value) noexcept
+    : m_enum(&enum_def)
+    , m_value(value)
+    {
+    }
+
+    /**
+     * @brief Returns the referenced enum description.
+     *
+     * @return EnumT const& - Bound enum description.
+     */
+    constexpr EnumT const& enum_def() const noexcept {
+      return *m_enum;
+    }
+
+    /**
+     * @brief Returns the bound runtime value.
+     *
+     * @return value_type - Stored runtime value.
+     */
+    constexpr value_type value() const noexcept {
+      return m_value;
+    }
+
+    /**
+     * @brief Renders the bound enum description and runtime value into text.
+     *
+     * @return std::string - Final rendered text.
+     */
+    std::string to_string() const {
+      return impl::EnumTextRenderer<EnumT>{ enum_def(), value() }.render();
+    }
+  };
+
+  /**
+   * @brief Streams one rendered enum value view.
+   *
+   * @tparam EnumT - Immutable enum description type.
+   * @param stream - Destination output stream.
+   * @param value_view - Enum description plus runtime value view.
+   * @return std::ostream& - Destination output stream.
+   */
+  template <typename EnumT>
+  std::ostream& operator<<(std::ostream& stream, EnumValueView<EnumT> const& value_view) {
+    return stream << value_view.to_string();
+  }
 
   /**
    * @brief Typed-chaining builder for immutable enum descriptions.
@@ -2244,8 +2571,8 @@ namespace Constexpr {
  *
  * ```cpp
  * constexpr auto minimal_enum = BUILD_ENUM_DESCRIPTION(EnumType,
- *    .Name(TestEnum{ 0x01u }, "one")
- *    .Name(TestEnum{ 0x02u }, "two")
+ *    .Named(TestEnum{ 0x01u }, "one")
+ *    .Named(TestEnum{ 0x02u }, "two")
  * );
  */
 #define BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                          \
