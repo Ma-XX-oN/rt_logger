@@ -1,4 +1,4 @@
-#include "constexpr/enum_spec.hpp"
+#include "constexpr/enum.hpp"
 
 #include <gtest/gtest.h>
 

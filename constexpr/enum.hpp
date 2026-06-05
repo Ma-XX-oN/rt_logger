@@ -1,5 +1,5 @@
 /**
- * @file enum_spec.hpp
+ * @file enum.hpp
  * @author Adrian Hawryluk (adrian.hawryluk@gmail.com)
  * @brief Type specifier for enums to allow for safer enum usage and clearer
  *   display.
@@ -10,24 +10,23 @@
  *
  * TODO: Need to flesh this out more.
  */
+#ifndef CONSTEXPR_ENUM_HPP
+#define CONSTEXPR_ENUM_HPP
+
 #include <cstddef>
 #include <cstdlib>
 #include <cassert>
 #include <cstdint>
-#include <limits>
 #include <variant>
-// #include <iterator>
-#include <functional>
 #include <string_view>
 #include <type_traits>
-#include "bit.hpp"
+
 #include "masked_bits.hpp"
 #include "bitwise_enum.hpp"
 #include "int_codec.hpp"
 #include "string.hpp"
 #include "bitwise_enum.hpp"
 #include "type_traits.hpp"
-#include "algorithm.hpp"
 #include "heap.hpp"
 #include "int_codec.hpp"
 
@@ -1209,3 +1208,5 @@ namespace Constexpr {
   } // namespace impl
 
 } // namespace Constexpr
+
+#endif // CONSTEXPR_ENUM_HPP
