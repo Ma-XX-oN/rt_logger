@@ -6,6 +6,9 @@
   - [Builder Shape](#builder-shape)
   - [Builder States](#builder-states)
   - [Parent-Typed Nesting](#parent-typed-nesting)
+  - [Future Enhancements](#future-enhancements)
+    - [Output Format](#output-format)
+    - [Encoding Format](#encoding-format)
 - [Potential Usage Examples](#potential-usage-examples)
 - [Enum Stream Specification](#enum-stream-specification)
 - [Possible Render Mechanism](#possible-render-mechanism)
@@ -137,6 +140,8 @@ So the intended shape is closer to `IfScope<Parent>` and `ElseScope<Parent>` tha
 
 ### Future Enhancements
 
+#### Output Format
+
 One accepted future enhancement is richer numeric output formatting without widening the common `Numeric` command form.
 
 For plain `Numeric`, the remaining two format bits may be used as a compact numeric display mode:
@@ -150,6 +155,11 @@ For plain `Numeric`, the remaining two format bits may be used as a compact nume
 
 If a conditional numeric branch needs any non-default numeric presentation, it should not use `GroupIfNumeric`. It
 should encode as `GroupIf` with a normal `Numeric` command inside the branch instead.
+
+#### Encoding Format
+
+Since a group mask shall only be one bit, instead of encoding the bitmask as the underlying type or dint-condensed
+underlying type, we can replace that with an unsigned char to signify which bit is set.
 
 ## Potential Usage Examples
 
