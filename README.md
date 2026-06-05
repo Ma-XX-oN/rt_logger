@@ -396,6 +396,11 @@ enum eEnumCommand : std::uint8_t {
 
 ##### Potential Usage Examples If Used as More Than Type Description
 
+The examples in this section describe the intended builder-facing API for enum
+descriptions. The currently tested low-level stream representation and encoder
+live in `constexpr/enum_spec.hpp`; these examples are design-level usage, not a
+guarantee that this exact front-end surface is available in the current build.
+
 Simple:
 
 ```cpp
