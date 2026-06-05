@@ -100,7 +100,7 @@ namespace Constexpr {
 
     constexpr std::uint16_t used_space() const {
       return static_cast<std::uint16_t>(memory.size());
-    }    
+    }
   };
   
 
@@ -149,7 +149,7 @@ namespace Constexpr {
       */
     template <typename T>
     constexpr item_id_t add_item(T item) {
-      memory.at(next_id) = item;
+      memory.at(next_id) = Variant{ item };
       return ++next_id;
     }
 
