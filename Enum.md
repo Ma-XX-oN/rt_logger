@@ -9,6 +9,7 @@
   - [Future Enhancements](#future-enhancements)
     - [Output Format](#output-format)
     - [Encoding Format](#encoding-format)
+    - [Type Erasure](#type-erasure)
 - [Potential Usage Examples](#potential-usage-examples)
 - [Enum Stream Specification](#enum-stream-specification)
 - [Possible Render Mechanism](#possible-render-mechanism)
@@ -160,6 +161,12 @@ should encode as `GroupIf` with a normal `Numeric` command inside the branch ins
 
 Since a group mask shall only be one bit, instead of encoding the bitmask as the underlying type or dint-condensed
 underlying type, we can replace that with an unsigned char to signify which bit is set.
+
+#### Type Erasure
+
+There should to be a way to specify the width and sign of the underlying type in a runtime way because otherwise the
+receiver of the Enum program would have to parse the Enum program every time it has to deal with an Enum type that was
+sent by wire.
 
 ## Potential Usage Examples
 
