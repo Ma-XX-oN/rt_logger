@@ -13,16 +13,14 @@ using TestPairs = Constexpr::impl::Pairs<TestEnum>;
 using TestNamed = Constexpr::impl::Named<TestEnum>;
 using TestNumeric = Constexpr::impl::Numeric<TestEnum>;
 using TestConditional = Constexpr::impl::Conditional<TestEnum>;
-using TestGlobal = Constexpr::impl::Global<TestEnum>;
 using TestGroup = Constexpr::impl::Group<TestEnum>;
 using TestCmds = Constexpr::impl::Cmds<TestEnum>;
-using TestGroupEncodingForm = Constexpr::impl::eGroupEncodingForm;
-using TestConditionalEncodingPlan = Constexpr::impl::ConditionalEncodingPlan;
-using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGlobal, TestGroup, TestCmds>;
+using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGroup, TestCmds>;
 using TestSettings = Constexpr::impl::EnumSettings<TestEnum, 128, 32, TestItemVariant>;
-using TestEnumDef = Constexpr::impl::Enum<TestSettings>;
+using TestEnumDef = Constexpr::Enum<TestSettings>;
 using TestEncoder = Constexpr::impl::EnumEncoder<TestEnumDef>;
-using TestItemId = Constexpr::impl::item_id_t;
+using TestItemId = Constexpr::item_id_t;
+using TestStringId = Constexpr::string_id_t;
 using TestProgram = Constexpr::string<129>;
 using TestScopeData = Constexpr::impl::ScopeData<TestEnum>;
 using Constexpr::eEnumCommand;
@@ -82,25 +80,43 @@ constexpr TestItemId add_cmd(TestEnumDef& enum_def, TestItemId command_id, TestI
 }
 
 /**
- * @brief Stores one global node referencing a command list.
- *
- * @param enum_def - Test enum definition storage.
- * @param cmds_id - Referenced command-list id.
- * @return TestItemId - Stored global id.
- */
-constexpr TestItemId add_global(TestEnumDef& enum_def, TestItemId cmds_id) {
-  return enum_def.add_item(TestGlobal{ cmds_id });
-}
-
-/**
  * @brief Stores one group referencing a command list.
  *
  * @param enum_def - Test enum definition storage.
  * @param cmds_id - Referenced command-list id.
+ * @param name - Optional group name to store.
  * @return TestItemId - Stored group id.
  */
-constexpr TestItemId add_group(TestEnumDef& enum_def, TestItemId cmds_id) {
-  return enum_def.add_item(TestGroup{ 0, cmds_id });
+constexpr TestItemId add_group(TestEnumDef& enum_def, TestItemId cmds_id, char const* name = nullptr) {
+  TestStringId const name_id{
+    name ? enum_def.add_string(name) : static_cast<TestStringId>(0u)
+  };
+  return enum_def.add_item(TestGroup{ name_id, cmds_id });
+}
+
+/**
+ * @brief Stores one conditional command.
+ *
+ * @param enum_def - Test enum definition storage.
+ * @param group_bitmask - Single-bit conditional selector.
+ * @param scope_bitmask - Child scope bitmask shared by both branches.
+ * @param true_group_id - Group id for the true branch.
+ * @param false_group_id - Group id for the false branch.
+ * @return TestItemId - Stored conditional-command id.
+ */
+constexpr TestItemId add_conditional(
+  TestEnumDef& enum_def,
+  TestEnum group_bitmask,
+  TestEnum scope_bitmask,
+  TestItemId true_group_id,
+  TestItemId false_group_id)
+{
+  return enum_def.add_item(TestConditional{
+    group_bitmask,
+    scope_bitmask,
+    true_group_id,
+    false_group_id,
+  });
 }
 
 /**
@@ -182,188 +198,27 @@ inline TestItemId add_pair_chain(TestEnumDef& enum_def, int count) {
   return next_id;
 }
 
-// Compile-time scenarios pin down the conditional opcode choice before the
-// full encoder is finished.
-
-constexpr bool kConditionalPlanUsesInlineTrueNumeric{ []() constexpr {
-  // A true-side inline numeric with no false branch should stay as bare GroupIfNumeric.
-  TestConditionalEncodingPlan const plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      TestGroupEncodingForm::Numeric,
-      11,
-      TestGroupEncodingForm::None,
-      0)
-  };
-
-  return plan.inline_group_id == 11
-    && plan.else_group_id == 0
-    && plan.if_opcode == eEnumCommand::GroupIfNumeric
-    && !plan.has_else_branch;
-}() };
-static_assert(kConditionalPlanUsesInlineTrueNumeric);
-
-constexpr bool kConditionalPlanUsesNamedElseAfterTrueNumeric{ []() constexpr {
-  // A plain named false branch after inline true numeric should use a pair-style Else.
-  TestConditionalEncodingPlan const plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      TestGroupEncodingForm::Numeric,
-      11,
-      TestGroupEncodingForm::NamedPairs,
-      12)
-  };
-
-  return plan.inline_group_id == 11
-    && plan.else_group_id == 12
-    && plan.if_opcode == eEnumCommand::GroupIfNumeric
-    && plan.has_else_branch
-    && plan.else_opcode == eEnumCommand::Else;
-}() };
-static_assert(kConditionalPlanUsesNamedElseAfterTrueNumeric);
-
-constexpr bool kConditionalPlanUsesNegatedFalseNumeric{ []() constexpr {
-  // A false-side inline numeric should become Negate, leaving a command-style true else branch.
-  TestConditionalEncodingPlan const plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      TestGroupEncodingForm::Commands,
-      21,
-      TestGroupEncodingForm::Numeric,
-      22)
-  };
-
-  return plan.inline_group_id == 22
-    && plan.else_group_id == 21
-    && plan.if_opcode == (eEnumCommand::GroupIfNumeric | eEnumCommand::fNegate)
-    && plan.has_else_branch
-    && plan.else_opcode == (eEnumCommand::Else | eEnumCommand::fElseCmds);
-}() };
-static_assert(kConditionalPlanUsesNegatedFalseNumeric);
-
-constexpr bool kConditionalPlanUsesGroupIfNamedWhenTrueBranchIsPlainNamed{ []() constexpr {
-  // A plain named true branch should use GroupIfNamed and keep a command-shaped else branch explicit.
-  TestConditionalEncodingPlan const plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      TestGroupEncodingForm::NamedPairs,
-      31,
-      TestGroupEncodingForm::Commands,
-      32)
-  };
-
-  return plan.inline_group_id == 31
-    && plan.else_group_id == 32
-    && plan.if_opcode == eEnumCommand::GroupIfNamed
-    && plan.has_else_branch
-    && plan.else_opcode == (eEnumCommand::Else | eEnumCommand::fElseCmds);
-}() };
-static_assert(kConditionalPlanUsesGroupIfNamedWhenTrueBranchIsPlainNamed);
-
-constexpr bool kConditionalPlanFallsBackToGroupIfForCommandBranches{ []() constexpr {
-  // Two command-shaped branches should fall back to a general GroupIf plus command Else.
-  TestConditionalEncodingPlan const plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      TestGroupEncodingForm::Commands,
-      41,
-      TestGroupEncodingForm::Commands,
-      42)
-  };
-
-  return plan.inline_group_id == 41
-    && plan.else_group_id == 42
-    && plan.if_opcode == eEnumCommand::GroupIf
-    && plan.has_else_branch
-    && plan.else_opcode == (eEnumCommand::Else | eEnumCommand::fElseCmds);
-}() };
-static_assert(kConditionalPlanFallsBackToGroupIfForCommandBranches);
-
-// Runtime tests keep the compile-time proofs visible in the normal test runner
-// and verify the stored fixture shapes classify the way the planner expects.
-
-TEST(EnumSpecConditionalPlan, SupportsCompileTimeSelection)
+TEST(EnumSpecGroup, DetectsInlineConditionalShapes)
 {
-  // Surface the constexpr plan-selection proofs in the regular GTest output.
-  EXPECT_TRUE(kConditionalPlanUsesInlineTrueNumeric);
-  EXPECT_TRUE(kConditionalPlanUsesNamedElseAfterTrueNumeric);
-  EXPECT_TRUE(kConditionalPlanUsesNegatedFalseNumeric);
-  EXPECT_TRUE(kConditionalPlanUsesGroupIfNamedWhenTrueBranchIsPlainNamed);
-  EXPECT_TRUE(kConditionalPlanFallsBackToGroupIfForCommandBranches);
-}
-
-TEST(EnumSpecGroup, ClassifiesStoredGroupsByConditionalForm)
-{
-  // Distinguish empty, named-pair, numeric, and command-shaped stored groups.
+  // Single-command numeric and plain named groups inline directly; masked or multi-command groups do not.
   TestEnumDef enum_def{};
 
-  // An empty group contributes no branch body.
-  TestItemId const empty_group_id{ add_group(enum_def, 0) };
-
-  // A single unmasked named command can lower directly as pairs.
   TestItemId const named_group_id{ add_single_named_group(enum_def) };
-
-  // A single numeric command can lower inline.
   TestItemId const numeric_group_id{ add_single_numeric_group(enum_def) };
-
-  // Masked or multi-command groups must remain command lists.
   TestItemId const masked_named_group_id{ add_masked_named_group(enum_def) };
   TestItemId const multi_command_group_id{ add_multi_command_group(enum_def) };
 
-  TestGroupEncodingForm const empty_form{
-    Constexpr::impl::classify_group_encoding_form(enum_def, empty_group_id)
-  };
-  TestGroupEncodingForm const named_form{
-    Constexpr::impl::classify_group_encoding_form(enum_def, named_group_id)
-  };
-  TestGroupEncodingForm const numeric_form{
-    Constexpr::impl::classify_group_encoding_form(enum_def, numeric_group_id)
-  };
-  TestGroupEncodingForm const masked_named_form{
-    Constexpr::impl::classify_group_encoding_form(enum_def, masked_named_group_id)
-  };
-  TestGroupEncodingForm const multi_command_form{
-    Constexpr::impl::classify_group_encoding_form(enum_def, multi_command_group_id)
-  };
+  EXPECT_TRUE(enum_def.item<TestGroup>(named_group_id).has_only_one_Named_with_no_bitmask(enum_def));
+  EXPECT_FALSE(enum_def.item<TestGroup>(named_group_id).has_only_one_Numeric(enum_def));
 
-  EXPECT_EQ(empty_form, TestGroupEncodingForm::None);
-  EXPECT_EQ(named_form, TestGroupEncodingForm::NamedPairs);
-  EXPECT_EQ(numeric_form, TestGroupEncodingForm::Numeric);
-  EXPECT_EQ(masked_named_form, TestGroupEncodingForm::Commands);
-  EXPECT_EQ(multi_command_form, TestGroupEncodingForm::Commands);
-}
+  EXPECT_TRUE(enum_def.item<TestGroup>(numeric_group_id).has_only_one_Numeric(enum_def));
+  EXPECT_FALSE(enum_def.item<TestGroup>(numeric_group_id).has_only_one_Named_with_no_bitmask(enum_def));
 
-TEST(EnumSpecConditionalPlan, BuildsPlanFromStoredGroups)
-{
-  // Build plans from stored groups to prove classification and planning agree.
-  TestEnumDef enum_def{};
+  EXPECT_FALSE(enum_def.item<TestGroup>(masked_named_group_id).has_only_one_Numeric(enum_def));
+  EXPECT_FALSE(enum_def.item<TestGroup>(masked_named_group_id).has_only_one_Named_with_no_bitmask(enum_def));
 
-  // True-side numeric should inline and the masked named false side should become a command else branch.
-  TestItemId const true_numeric_group_id{ add_single_numeric_group(enum_def) };
-  TestItemId const false_command_group_id{ add_masked_named_group(enum_def) };
-  TestConditionalEncodingPlan const numeric_then_else_plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      enum_def,
-      true_numeric_group_id,
-      false_command_group_id)
-  };
-
-  EXPECT_EQ(numeric_then_else_plan.inline_group_id, true_numeric_group_id);
-  EXPECT_EQ(numeric_then_else_plan.else_group_id, false_command_group_id);
-  EXPECT_EQ(numeric_then_else_plan.if_opcode, eEnumCommand::GroupIfNumeric);
-  EXPECT_TRUE(numeric_then_else_plan.has_else_branch);
-  EXPECT_EQ(numeric_then_else_plan.else_opcode, (eEnumCommand::Else | eEnumCommand::fElseCmds));
-
-  // False-side numeric should inline under Negate and a plain named true side should become a pair else branch.
-  TestItemId const true_named_group_id{ add_single_named_group(enum_def) };
-  TestItemId const false_numeric_group_id{ add_single_numeric_group(enum_def) };
-  TestConditionalEncodingPlan const negated_numeric_plan{
-    Constexpr::impl::make_conditional_encoding_plan(
-      enum_def,
-      true_named_group_id,
-      false_numeric_group_id)
-  };
-
-  EXPECT_EQ(negated_numeric_plan.inline_group_id, false_numeric_group_id);
-  EXPECT_EQ(negated_numeric_plan.else_group_id, true_named_group_id);
-  EXPECT_EQ(negated_numeric_plan.if_opcode, (eEnumCommand::GroupIfNumeric | eEnumCommand::fNegate));
-  EXPECT_TRUE(negated_numeric_plan.has_else_branch);
-  EXPECT_EQ(negated_numeric_plan.else_opcode, eEnumCommand::Else);
+  EXPECT_FALSE(enum_def.item<TestGroup>(multi_command_group_id).has_only_one_Numeric(enum_def));
+  EXPECT_FALSE(enum_def.item<TestGroup>(multi_command_group_id).has_only_one_Named_with_no_bitmask(enum_def));
 }
 
 TEST(EnumSpecWriter, AllowsPatchThroughCursorByteReference)
@@ -436,26 +291,171 @@ TEST(EnumSpecEncoding, EmitsContinueScopeWhenNamedPairsOverflowBlockBudget)
     static_cast<unsigned char>(eEnumCommand::ContinueScope));
 }
 
-TEST(EnumSpecEncoding, GlobalEncodesRootCommandList)
+TEST(EnumSpecEncoding, ConditionalEmitsNamedIfAndPairElseBranches)
 {
-  // A stored global list should provide the root encode entry point for commands.
+  // A plain named true branch should lower to GroupIfNamed, keep the conditional scope explicit,
+  // and emit a pair-style Else branch when the false group is also plain named.
   TestEnumDef enum_def{};
-  TestItemId const pair_id{ add_pair(enum_def, 0x01u, "one") };
-  TestItemId const named_id{ add_named(enum_def, pair_id) };
-  TestItemId const cmds_id{ add_cmd(enum_def, named_id) };
-  TestItemId const global_id{ add_global(enum_def, cmds_id) };
+
+  TestItemId const true_pair_id{ add_pair(enum_def, 0x01u, "one") };
+  TestItemId const true_named_id{ add_named(enum_def, true_pair_id) };
+  TestItemId const true_cmds_id{ add_cmd(enum_def, true_named_id) };
+  TestItemId const true_group_id{ add_group(enum_def, true_cmds_id, "ifg") };
+
+  TestItemId const false_pair_id{ add_pair(enum_def, 0x02u, "two") };
+  TestItemId const false_named_id{ add_named(enum_def, false_pair_id) };
+  TestItemId const false_cmds_id{ add_cmd(enum_def, false_named_id) };
+  TestItemId const false_group_id{ add_group(enum_def, false_cmds_id) };
+
+  TestItemId const conditional_id{
+    add_conditional(enum_def, 0x80u, 0x0Fu, true_group_id, false_group_id)
+  };
 
   TestProgram program{};
   Constexpr::impl::ProgramWriter writer{ program };
   TestEncoder encoder{ enum_def, writer };
 
-  enum_def.item<TestGlobal>(global_id).encode(encoder);
+  enum_def.item<TestConditional>(conditional_id).encode(encoder);
   writer.finish(program);
 
-  EXPECT_EQ(program.size(), 6u);
+  ASSERT_EQ(program.size(), 18u);
   EXPECT_EQ(
     static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(eEnumCommand::Named));
+    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::GroupIfNamed)
+      | static_cast<unsigned char>(eEnumCommand::fHasGroupName)
+      | 0x01u));
+  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
+  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+  EXPECT_EQ(std::string_view{ program.data() + 3u }, "ifg");
+  EXPECT_EQ(static_cast<unsigned char>(program[7]), 0x01u);
+  EXPECT_EQ(std::string_view{ program.data() + 8u }, "one");
+  EXPECT_EQ(static_cast<unsigned char>(program[12]), static_cast<unsigned char>(eEnumCommand::Else));
+  EXPECT_EQ(static_cast<unsigned char>(program[13]), 0x02u);
+  EXPECT_EQ(std::string_view{ program.data() + 14u }, "two");
+}
+
+TEST(EnumSpecEncoding, ConditionalEmitsNumericIfAndCommandElseBranches)
+{
+  // A numeric true branch should inline under GroupIfNumeric and leave a command-shaped false
+  // branch behind an Else | ElseCmds header.
+  TestEnumDef enum_def{};
+
+  TestItemId const true_numeric_id{ add_numeric(enum_def, 0x0Fu, "bits") };
+  TestItemId const true_cmds_id{ add_cmd(enum_def, true_numeric_id) };
+  TestItemId const true_group_id{ add_group(enum_def, true_cmds_id) };
+
+  TestItemId const false_pair_id{ add_pair(enum_def, 0x02u, "two") };
+  TestItemId const false_named_id{ add_named(enum_def, false_pair_id, true, 0x03u) };
+  TestItemId const false_cmds_id{ add_cmd(enum_def, false_named_id) };
+  TestItemId const false_group_id{ add_group(enum_def, false_cmds_id, "else") };
+
+  TestItemId const conditional_id{
+    add_conditional(enum_def, 0x80u, 0x0Fu, true_group_id, false_group_id)
+  };
+
+  TestProgram program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  TestEncoder encoder{ enum_def, writer };
+
+  enum_def.item<TestConditional>(conditional_id).encode(encoder);
+  writer.finish(program);
+
+  ASSERT_EQ(program.size(), 21u);
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[0]),
+    static_cast<unsigned char>(eEnumCommand::GroupIfNumeric));
+  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
+  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+  EXPECT_EQ(std::string_view{ program.data() + 3u }, "bits");
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[8]),
+    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Else)
+      | static_cast<unsigned char>(eEnumCommand::fHasGroupName)
+      | static_cast<unsigned char>(eEnumCommand::fElseCmds)));
+  EXPECT_EQ(std::string_view{ program.data() + 9u }, "else");
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[14]),
+    static_cast<unsigned char>(eEnumCommand::Named | eEnumCommand::fHasBitmask));
+  EXPECT_EQ(static_cast<unsigned char>(program[15]), 0x03u);
+  EXPECT_EQ(static_cast<unsigned char>(program[16]), 0x02u);
+  EXPECT_EQ(std::string_view{ program.data() + 17u }, "two");
+}
+
+TEST(EnumSpecEncoding, ConditionalEmitsNegatedNumericWhenOnlyFalseBranchInlines)
+{
+  // A numeric false branch should inline under GroupIfNumeric | Negate and leave the true branch as Else pairs.
+  TestEnumDef enum_def{};
+
+  TestItemId const true_pair_id{ add_pair(enum_def, 0x01u, "one") };
+  TestItemId const true_named_id{ add_named(enum_def, true_pair_id) };
+  TestItemId const true_cmds_id{ add_cmd(enum_def, true_named_id) };
+  TestItemId const true_group_id{ add_group(enum_def, true_cmds_id, "ifg") };
+
+  TestItemId const false_numeric_id{ add_numeric(enum_def, 0x0Fu, "bits") };
+  TestItemId const false_cmds_id{ add_cmd(enum_def, false_numeric_id) };
+  TestItemId const false_group_id{ add_group(enum_def, false_cmds_id) };
+
+  TestItemId const conditional_id{
+    add_conditional(enum_def, 0x80u, 0x0Fu, true_group_id, false_group_id)
+  };
+
+  TestProgram program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  TestEncoder encoder{ enum_def, writer };
+
+  enum_def.item<TestConditional>(conditional_id).encode(encoder);
+  writer.finish(program);
+
+  ASSERT_EQ(program.size(), 18u);
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[0]),
+    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::GroupIfNumeric)
+      | static_cast<unsigned char>(eEnumCommand::fNegate)));
+  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
+  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+  EXPECT_EQ(std::string_view{ program.data() + 3u }, "bits");
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[8]),
+    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Else)
+      | static_cast<unsigned char>(eEnumCommand::fHasGroupName)));
+  EXPECT_EQ(std::string_view{ program.data() + 9u }, "ifg");
+  EXPECT_EQ(static_cast<unsigned char>(program[13]), 0x01u);
+  EXPECT_EQ(std::string_view{ program.data() + 14u }, "one");
+}
+
+TEST(EnumSpecEncoding, ConditionalCommandBranchCountsStoredCommandsNotPairContinuations)
+{
+  // A command-style conditional branch counts stored command entries in its If_CmdCount field,
+  // even when one child command later extends itself with ContinueScope.
+  TestEnumDef enum_def{};
+
+  TestItemId const long_pairs_id{ add_pair_chain(enum_def, 17) };
+  TestItemId const masked_named_id{ add_named(enum_def, long_pairs_id, true, 0x1Fu) };
+  TestItemId const true_cmds_id{ add_cmd(enum_def, masked_named_id) };
+  TestItemId const true_group_id{ add_group(enum_def, true_cmds_id) };
+
+  TestItemId const conditional_id{
+    add_conditional(enum_def, 0x80u, 0x1Fu, true_group_id, 0)
+  };
+
+  TestProgram program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  TestEncoder encoder{ enum_def, writer };
+
+  enum_def.item<TestConditional>(conditional_id).encode(encoder);
+  writer.finish(program);
+
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[0]),
+    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::GroupIf) | 0x01u));
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[3]),
+    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Named)
+      | static_cast<unsigned char>(eEnumCommand::fHasBitmask)
+      | 0x0Fu));
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[53]),
+    static_cast<unsigned char>(eEnumCommand::ContinueScope));
 }
 
 } // namespace
