@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 
 namespace {
@@ -16,14 +17,22 @@ using TestConditional = Constexpr::impl::Conditional<TestEnum>;
 using TestGroup = Constexpr::impl::Group<TestEnum>;
 using TestCmds = Constexpr::impl::Cmds<TestEnum>;
 using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGroup, TestCmds>;
-using TestSettings = Constexpr::impl::EnumSettings<TestEnum, 128, 32, TestItemVariant>;
+using TestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_space(128, 32), TestItemVariant>;
 using TestEnumDef = Constexpr::Enum<TestSettings>;
+using TestBuilder = Constexpr::EnumBuilder<TestSettings>;
 using TestEncoder = Constexpr::impl::EnumEncoder<TestEnumDef>;
 using TestItemId = Constexpr::item_id_t;
 using TestStringId = Constexpr::string_id_t;
 using TestProgram = Constexpr::string<129>;
 using TestScopeData = Constexpr::impl::ScopeData<TestEnum>;
 using Constexpr::eEnumCommand;
+
+constexpr bool builder_end_returns_exact_parent{
+  std::is_same_v<
+    decltype(Constexpr::build_enum_description<TestSettings>().If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }).End()),
+    TestBuilder>
+};
+static_assert(builder_end_returns_exact_parent);
 
 // Fixture-building helpers create stored group shapes that the runtime tests
 // can classify without manually assembling ids inline in each case.
@@ -456,6 +465,73 @@ TEST(EnumSpecEncoding, ConditionalCommandBranchCountsStoredCommandsNotPairContin
   EXPECT_EQ(
     static_cast<unsigned char>(program[53]),
     static_cast<unsigned char>(eEnumCommand::ContinueScope));
+}
+
+TEST(EnumSpecBuilder, BuildsRootNamedListAndStoresCmdsId)
+{
+  // Repeated Name() calls in one command scope should reuse the same implicit Named command and root Cmds anchor.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .Name(TestEnum{ 0x01u }, "one")
+      .Name(TestEnum{ 0x02u }, "two")
+      .Build()
+  };
+
+  ASSERT_NE(enum_def.cmds_id(), 0u);
+
+  auto const& root_cmds{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+  auto const& named{ enum_def.item<TestNamed>(root_cmds.command_id) };
+  EXPECT_FALSE(named.has_mask);
+
+  auto const& first_pair{ enum_def.item<TestPairs>(named.pairs_id) };
+  EXPECT_EQ(first_pair.value, 0x01u);
+  EXPECT_EQ(enum_def.get_string(first_pair.name_id), "one");
+  ASSERT_NE(first_pair.next_pairs_id, 0u);
+
+  auto const& second_pair{ enum_def.item<TestPairs>(first_pair.next_pairs_id) };
+  EXPECT_EQ(second_pair.value, 0x02u);
+  EXPECT_EQ(enum_def.get_string(second_pair.name_id), "two");
+  EXPECT_EQ(second_pair.next_pairs_id, 0u);
+  EXPECT_EQ(root_cmds.next_id, 0u);
+}
+
+TEST(EnumSpecBuilder, BuildsConditionalBranchesThroughTypedScopes)
+{
+  // IfNot() should store the first user-authored branch as false, then Else() should add the true branch and return to root on End().
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .IfNot(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
+        .Name(TestEnum{ 0x01u }, "one")
+      .Else("elseg")
+        .Number(TestEnum{ 0x0Fu }, "bits")
+      .End()
+      .Build()
+  };
+
+  ASSERT_NE(enum_def.cmds_id(), 0u);
+
+  auto const& root_cmds{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+  auto const& conditional{ enum_def.item<TestConditional>(root_cmds.command_id) };
+  EXPECT_EQ(conditional.group_bitmask, 0x80u);
+  EXPECT_EQ(conditional.bitmask, 0x0Fu);
+  ASSERT_NE(conditional.false_group_id, 0u);
+  ASSERT_NE(conditional.true_group_id, 0u);
+
+  auto const& if_group{ enum_def.item<TestGroup>(conditional.false_group_id) };
+  auto const& else_group{ enum_def.item<TestGroup>(conditional.true_group_id) };
+  EXPECT_EQ(enum_def.get_string(if_group.name_id), "ifg");
+  EXPECT_EQ(enum_def.get_string(else_group.name_id), "elseg");
+
+  auto const& if_cmds{ enum_def.item<TestCmds>(if_group.cmds_id) };
+  auto const& if_named{ enum_def.item<TestNamed>(if_cmds.command_id) };
+  auto const& if_pair{ enum_def.item<TestPairs>(if_named.pairs_id) };
+  EXPECT_EQ(if_pair.value, 0x01u);
+  EXPECT_EQ(enum_def.get_string(if_pair.name_id), "one");
+
+  auto const& else_cmds{ enum_def.item<TestCmds>(else_group.cmds_id) };
+  auto const& else_numeric{ enum_def.item<TestNumeric>(else_cmds.command_id) };
+  EXPECT_EQ(else_numeric.mask, 0x0Fu);
+  EXPECT_EQ(enum_def.get_string(else_numeric.name_id), "bits");
 }
 
 } // namespace

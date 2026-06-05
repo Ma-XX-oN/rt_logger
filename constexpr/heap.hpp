@@ -97,6 +97,10 @@ namespace Constexpr {
       assert(begin_id < end_id && end_id <= memory.size());
       return std::string_view(memory.begin() + begin_id - 1, end_id - begin_id);
     }
+
+    constexpr std::uint16_t used_space() const {
+      return static_cast<std::uint16_t>(memory.size());
+    }    
   };
   
 
@@ -219,6 +223,10 @@ namespace Constexpr {
     constexpr auto const* get_item_if(item_id_t id) const {
       assert(id && id <= next_id || !"Out of bounds");
       return std::get_if<Item>(&memory.at(id-1));
+    }
+
+    constexpr std::uint16_t used_space() const {
+      return next_id;
     }
   };
 
