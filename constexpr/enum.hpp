@@ -1961,12 +1961,20 @@ namespace Constexpr {
     using value_type = typename Settings::Value;
     using item_variant = Variant;
 
-    constexpr std::uint32_t reserve_space() {
-      return reserve_space(strings.used_space(), items.used_space());
+    constexpr std::uint32_t reserve_space() const {
+      return Constexpr::reserve_space(strings.used_space(), items.used_space());
+    }
+
+    constexpr std::uint32_t actual_space() const {
+      return Constexpr::reserve_space(Settings::MAX_STRING_STORAGE, Settings::MAX_ITEMS_STORAGE);
     }
 
     /**
      * @brief Returns the root command-list id for this enum description.
+     *
+     *   NOTE: Not going to be 0 because the first Cmds object is allocated when
+     *         there is a command object to attach to it.  It's simpler to
+     *         program it this way.
      *
      * @return item_id_t - Root `Cmds` node id or zero when empty.
      */
@@ -2235,18 +2243,19 @@ namespace Constexpr {
  * @example
  *
  * ```cpp
- * constexpr auto minimal_enum = BUILD_ENUM(EnumType,
+ * constexpr auto minimal_enum = BUILD_ENUM_DESCRIPTION(EnumType,
  *    .Name(TestEnum{ 0x01u }, "one")
  *    .Name(TestEnum{ 0x02u }, "two")
  * );
  */
-#define BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                        \
-  Constexpr::build_enum_description<                                               \
-    Constexpr::DefaultEnumSettings<                                                \
-      enum_type,                                                                   \
-      Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<enum_type>> \
-    >() enum_description.reserve_space()                                           \
-  >() enum_description.Build()
+#define BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                          \
+  (Constexpr::build_enum_description<                                                \
+    Constexpr::DefaultEnumSettings<                                                  \
+      enum_type,                                                                     \
+      Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<enum_type>>() \
+        enum_description.reserve_space()                                             \
+    >                                                                                \
+  >() enum_description.Build())
 
 
 #endif // CONSTEXPR_ENUM_HPP

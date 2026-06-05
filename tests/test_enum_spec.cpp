@@ -34,6 +34,43 @@ constexpr bool builder_end_returns_exact_parent{
 };
 static_assert(builder_end_returns_exact_parent);
 
+// Prove that a fully built enum description can be materialized during constant evaluation.
+constexpr bool builder_build_materializes_constexpr_enum{
+  [] {
+    constexpr auto enum_def{
+      Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<int>>()
+        .Name(TestEnum{ 0x01u }, "one")
+        .Name(TestEnum{ 0x02u }, "two")
+        .Build()
+    };
+
+    static_assert(sizeof(enum_def) == 4384);  // assumes 8 byte alignment
+    static_assert(Constexpr::impl::string_space(enum_def.actual_space()) == 256); // default is 256 storable characters, even if not used.
+    static_assert(Constexpr::impl::item_space(enum_def.actual_space()) == 256);   // default is 256 storable items, even if not used.
+    return enum_def.cmds_id() != 0u;
+  }()
+};
+static_assert(builder_build_materializes_constexpr_enum);
+
+// Prove that the minimal-size two-pass macro can also build an enum during constant evaluation.
+constexpr bool build_enum_macro_materializes_constexpr_enum{
+  [] {
+    constexpr auto enum_def{
+      BUILD_ENUM_DESCRIPTION(TestEnum,
+        .Name(TestEnum{ 0x01u }, "one")
+        .Name(TestEnum{ 0x02u }, "two"))
+    };
+
+    static_assert(sizeof(enum_def) == 88);  // assumes 8 byte alignment
+    static_assert(Constexpr::impl::string_space(enum_def.actual_space()) == 8); // 8 characters stored including NUL terminators
+    static_assert(Constexpr::impl::item_space(enum_def.actual_space()) == 4);   // 4 items stored, 2 Named and 2 Cmds.
+                                                                                       // default is 256 and 256
+
+    return enum_def.cmds_id() != 0u;
+  }()
+};
+static_assert(build_enum_macro_materializes_constexpr_enum);
+
 // Fixture-building helpers create stored group shapes that the runtime tests
 // can classify without manually assembling ids inline in each case.
 
