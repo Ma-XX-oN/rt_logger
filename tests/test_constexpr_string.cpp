@@ -433,10 +433,12 @@ TEST(StringRuntime, AtRejectsEndIndexAndThrowsPastIt)
   );
 }
 
-#ifndef NDEBUG
 TEST(StringRuntime, SubscriptRejectsEndIndexAndPastItInDebug)
 {
   // operator[] guards the logical boundary with debug assertions.
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
   EXPECT_DEATH(
     []() {
       string<8> str{"hello"};
@@ -456,8 +458,8 @@ TEST(StringRuntime, SubscriptRejectsEndIndexAndPastItInDebug)
     }(),
     ""
   );
-}
 #endif
+}
 
 TEST(StringRuntime, OverflowingMutatorsThrowLengthError)
 {
