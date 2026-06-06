@@ -43,7 +43,7 @@
  */
 template <typename T
   , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
-std::byte* encode_value(std::byte* dst_begin_it, std::byte* const dst_end_it, T const* v_src, std::size_t M) {
+std::byte* encode_value(std::byte* dst_begin_it, [[maybe_unused]] std::byte* const dst_end_it, T const* v_src, std::size_t M) {
   assert(M >= 1);
   std::size_t const length{ sizeof(T) * M };
   assert(dst_begin_it + length <= dst_end_it || !"Not enough space to store in buffer");
