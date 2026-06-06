@@ -43,8 +43,9 @@ enum eEnumStorageType : std::uint8_t {
 An enum definition stream uses this storage type and a compact descriptor program to describe how enum values are named,
 grouped, and formatted.
 
-The stream is processed sequentially. If the stream length is known externally, decoding may stop at the end of the
-stream. Otherwise the stream must end with a `Terminate` command.
+The minimum valid program is exactly one byte: the storage-type header. After that header, the program body may be
+empty. The stream is processed sequentially. If the stream length is known externally, decoding may stop at the end of
+the stream. Otherwise the stream may use `Terminate` as an explicit end marker when the caller chooses to allow it.
 
 This format makes scope explicit in each `GroupIf*` command. The block's `bitmask` replaces the earlier idea of a
 separate `SetMaskValue` command, so the scope used by a conditional block is visible at the block header instead of
@@ -93,6 +94,8 @@ enum eEnumCommand : std::uint8_t {
 The accepted API direction for enum descriptions is:
 
 - `Constexpr::Enum<Settings>` is the public immutable representation type.
+- runtime and constexpr stream decoding is exposed through the builder chain:
+  - `build_enum_description<Settings>().decode_program(program_sv, throw_on_terminate).Build()`
 - `string_id_t` and `item_id_t` are public storage ids in `Constexpr`, defined with the storage layer rather than inside
   enum-encoding internals.
 - The encoding path is split into three roles:
@@ -194,7 +197,9 @@ auto eText = eValue.to_string();
 // Constexpr::string<N> type
 auto sDefStream = eDisc.definition_stream();
 
-auto eNewDesc = build_enum_description<std::uint8_t>(sDefStream);
+auto eNewDesc = build_enum_description<Constexpr::DefaultEnumSettings<std::uint8_t>>()
+  .decode_program(std::string_view{ sDefStream.data(), sDefStream.size() })
+  .Build();
 
 // This does runtime evaluation, so is slower than the assignment to eValue above.
 // Still it's usable and has the same definition as eDisc and the same size.
@@ -372,11 +377,16 @@ Execution rules:
     `GroupIfNumeric` `if` branch may only be followed immediately by `Else`.  An `Else` branch may be followed
     immediately by `ContinueScope`. Once the next command is neither a valid `Else` nor a valid `ContinueScope` for that
     branch, the branch ends and the previous scope bitmask is restored.
-12. `Else` is only valid immediately after `GroupIf`, `GroupIfNamed` or `GroupIfNumeric`.
-13. `ContinueScope` is only valid immediately after the branch it extends, i.e. `Named`, `GroupIf`, `GroupIfNamed`,
-    `Else` or another `ContinueScope`.  A named branch may be extended only by more `pair`s, and a command branch may be
-    extended only by more `command`s.
-14. A command-local `bitmask`, such as `Named` with `Has_bitmask` or `Numeric`, affects only that command. Only
+12. `Else` is postfix-only. It is never a standalone command. A decoder recognizes it only immediately after finishing
+    the `if` body of a `GroupIf`, `GroupIfNamed`, or `GroupIfNumeric` command.
+13. `ContinueScope` is postfix-only. It is never a standalone command. A decoder recognizes it only immediately after
+    finishing the branch it extends, i.e. `Named`, `GroupIf`, `GroupIfNamed`, `Else` or another `ContinueScope`. A named
+    branch may be extended only by more `pair`s, and a command branch may be extended only by more `command`s.
+14. A `GroupIf*` command and its immediately following valid `Else`, if present, count as one parent-scope command
+    construct. `Else` does not begin a second sibling command.
+15. The embedded branch counts are what make `Else` and `ContinueScope` unambiguous. A decoder only considers those
+    opcodes in the postfix positions created by the immediately preceding branch structure.
+16. A command-local `bitmask`, such as `Named` with `Has_bitmask` or `Numeric`, affects only that command. Only
     `GroupIf*` changes `scope_bitmask`.
 
 Because nested scope bitmasks must always narrow their parent scope, malformed or corrupted streams are easier to detect

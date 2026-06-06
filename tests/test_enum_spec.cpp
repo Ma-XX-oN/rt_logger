@@ -21,7 +21,9 @@ using TestGroup = Constexpr::impl::Group<TestEnum>;
 using TestCmds = Constexpr::impl::Cmds<TestEnum>;
 using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGroup, TestCmds>;
 using TestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_space(128, 32), TestItemVariant>;
+using LargeTestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_space(256, 64), TestItemVariant>;
 using TestEnumDef = Constexpr::Enum<TestSettings>;
+using LargeTestEnumDef = Constexpr::Enum<LargeTestSettings>;
 using TestBuilder = Constexpr::EnumBuilder<TestSettings>;
 using TestEncoder = Constexpr::impl::EnumEncoder<TestEnumDef>;
 using TestItemId = Constexpr::item_id_t;
@@ -29,6 +31,33 @@ using TestStringId = Constexpr::string_id_t;
 using TestProgram = Constexpr::string<129>;
 using TestScopeData = Constexpr::impl::ScopeData<TestEnum>;
 using Constexpr::eEnumCommand;
+using Constexpr::eEnumStorageType;
+
+/**
+ * @brief Returns the expected one-byte storage header for a value type used in
+ * the enum stream tests.
+ *
+ * @tparam ValueT - Enum or integral value type.
+ * @param compress - Whether to set the stream's compression flag.
+ * @return std::uint8_t - Storage-type header byte.
+ */
+template <typename ValueT>
+constexpr std::uint8_t storage_header_for(bool compress = false) {
+  auto header{ static_cast<std::uint8_t>(Constexpr::impl::storage_type_for_value_type<ValueT>()) };
+  if (compress) {
+    header = static_cast<std::uint8_t>(header | static_cast<std::uint8_t>(eEnumStorageType::Compress));
+  }
+  return header;
+}
+
+constexpr char kDecodeProgram[]{
+  static_cast<char>(0x04u),
+  static_cast<char>(static_cast<unsigned char>(eEnumCommand::Named) | 0x01u),
+  static_cast<char>(0x01u), 'o', 'n', 'e', '\0',
+  static_cast<char>(0x02u), 't', 'w', 'o', '\0',
+};
+
+constexpr std::string_view kDecodeProgramSv{ kDecodeProgram, sizeof(kDecodeProgram) };
 
 constexpr bool builder_end_returns_exact_parent{
   std::is_same_v<
@@ -74,8 +103,54 @@ constexpr bool build_enum_macro_materializes_constexpr_enum{
 };
 static_assert(build_enum_macro_materializes_constexpr_enum);
 
+// Prove that a valid stream can decode directly into a constexpr enum during constant evaluation.
+constexpr bool decode_program_materializes_constexpr_enum{
+  [] {
+    constexpr auto enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .decode_program(kDecodeProgramSv)
+        .Build()
+    };
+
+    static_assert(Constexpr::impl::string_space(enum_def.reserve_space()) == 8u);
+    static_assert(Constexpr::impl::item_space(enum_def.reserve_space()) == 4u);
+    return enum_def.cmds_id() != 0u;
+  }()
+};
+static_assert(decode_program_materializes_constexpr_enum);
+
+// Prove that the two-pass macro can replay decode_program() and still shrink to the minimal enum size.
+constexpr bool build_enum_macro_decodes_constexpr_program{
+  [] {
+    constexpr auto enum_def{
+      BUILD_ENUM_DESCRIPTION(TestEnum,
+        .decode_program(kDecodeProgramSv))
+    };
+
+    static_assert(Constexpr::impl::string_space(enum_def.actual_space()) == 8u);
+    static_assert(Constexpr::impl::item_space(enum_def.actual_space()) == 4u);
+    return enum_def.cmds_id() != 0u;
+  }()
+};
+static_assert(build_enum_macro_decodes_constexpr_program);
+
 // Fixture-building helpers create stored group shapes that the runtime tests
 // can classify without manually assembling ids inline in each case.
+
+/**
+ * @brief Streams one rendered enum value into a standard string.
+ *
+ * @tparam EnumT - Immutable enum description type.
+ * @param enum_def - Immutable enum description.
+ * @param value - Runtime value to render.
+ * @return std::string - Rendered output text.
+ */
+template <typename EnumT>
+std::string render_enum_value(EnumT const& enum_def, typename EnumT::value_type value) {
+  std::ostringstream stream{};
+  stream << enum_def(value);
+  return stream.str();
+}
 
 /**
  * @brief Streams one rendered enum value into a standard string.
@@ -85,9 +160,99 @@ static_assert(build_enum_macro_materializes_constexpr_enum);
  * @return std::string - Rendered output text.
  */
 std::string render_enum(TestEnumDef const& enum_def, TestEnum value) {
-  std::ostringstream stream{};
-  stream << enum_def(value);
-  return stream.str();
+  return render_enum_value(enum_def, value);
+}
+
+/**
+ * @brief Encodes one immutable enum description into a runtime-owned stream
+ * with the required storage-type header byte.
+ *
+ * @tparam EnumT - Immutable enum description type.
+ * @param enum_def - Immutable enum description to encode.
+ * @param compress - Whether constrained values should be emitted as condensed
+ *   dints.
+ * @param append_terminate - Whether to append an explicit Terminate opcode.
+ * @return std::string - Runtime-owned definition stream.
+ */
+template <typename EnumT>
+std::string encode_program_with_header(
+  EnumT const& enum_def,
+  bool compress = false,
+  bool append_terminate = false)
+{
+  Constexpr::string<2048> program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  writer.write_int(storage_header_for<typename EnumT::value_type>(compress));
+
+  Constexpr::impl::EnumEncoder<EnumT> encoder{ enum_def, writer, compress };
+  if (enum_def.cmds_id()) {
+    enum_def.template item<Constexpr::impl::Cmds<typename EnumT::value_type>>(enum_def.cmds_id()).encode(encoder);
+  }
+  if (append_terminate) {
+    writer.write_opcode(eEnumCommand::Terminate);
+  }
+
+  writer.finish(program);
+  return std::string{ program.data(), program.size() };
+}
+
+/**
+ * @brief Decodes one runtime enum stream through the builder-chain decoder.
+ *
+ * @tparam Settings - Destination enum storage settings.
+ * @param program - Runtime-owned program bytes.
+ * @param throw_on_terminate - Whether a Terminate opcode is rejected.
+ * @return Constexpr::Enum<Settings> - Decoded immutable enum description.
+ */
+template <typename Settings = TestSettings>
+Constexpr::Enum<Settings> decode_program(std::string_view program, bool throw_on_terminate = true) {
+  return Constexpr::build_enum_description<Settings>()
+    .decode_program(program, throw_on_terminate)
+    .Build();
+}
+
+/**
+ * @brief Writes one constrained integer in either full-width or condensed form
+ * for manual decoder tests.
+ *
+ * @tparam ValueT - Enum or integral value type.
+ * @param writer - Destination program writer.
+ * @param value - Constrained value to encode.
+ * @param scope_bitmask - Parent scope bitmask used for condensed encoding.
+ * @param compress - Whether the stream uses compressed constrained values.
+ */
+template <typename ValueT>
+void write_scoped_value(
+  Constexpr::impl::ProgramWriter& writer,
+  ValueT value,
+  ValueT scope_bitmask,
+  bool compress)
+{
+  if (compress) {
+    auto const condensed{ Constexpr::condense(scope_bitmask, value, true) };
+    writer.write_dint(Constexpr::make_unsigned_equivalent(condensed));
+    return;
+  }
+
+  writer.write_int(Constexpr::make_underlying_equivalent(value));
+}
+
+/**
+ * @brief Builds a runtime-owned manual program with the requested header byte.
+ *
+ * @tparam Fn - Body-writing callback type.
+ * @param header - One-byte storage-type header.
+ * @param fn - Callback that appends the program body.
+ * @return std::string - Runtime-owned definition stream.
+ */
+template <typename Fn>
+std::string build_manual_program(std::uint8_t header, Fn&& fn) {
+  Constexpr::string<2048> program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  writer.write_int(header);
+  fn(writer);
+  writer.finish(program);
+  return std::string{ program.data(), program.size() };
 }
 
 /**
@@ -258,6 +423,38 @@ inline TestItemId add_pair_chain(TestEnumDef& enum_def, int count) {
   }
 
   return next_id;
+}
+
+/**
+ * @brief Counts the number of stored pair nodes in a linked pair chain.
+ *
+ * @param enum_def - Test enum definition storage.
+ * @param pair_id - First pair id in the chain.
+ * @return std::size_t - Number of linked pair nodes.
+ */
+template <typename EnumT>
+constexpr std::size_t count_pairs(EnumT const& enum_def, TestItemId pair_id) {
+  std::size_t count{};
+  for (; pair_id != 0u; pair_id = enum_def.template item<TestPairs>(pair_id).next_pairs_id) {
+    ++count;
+  }
+  return count;
+}
+
+/**
+ * @brief Counts the number of stored command-list nodes in a linked command chain.
+ *
+ * @param enum_def - Test enum definition storage.
+ * @param cmds_id - First command-list id in the chain.
+ * @return std::size_t - Number of linked command-list nodes.
+ */
+template <typename EnumT>
+constexpr std::size_t count_commands(EnumT const& enum_def, TestItemId cmds_id) {
+  std::size_t count{};
+  for (; cmds_id != 0u; cmds_id = enum_def.template item<TestCmds>(cmds_id).next_id) {
+    ++count;
+  }
+  return count;
 }
 
 TEST(EnumSpecGroup, DetectsInlineConditionalShapes)
@@ -485,6 +682,38 @@ TEST(EnumSpecEncoding, ConditionalEmitsNegatedNumericWhenOnlyFalseBranchInlines)
   EXPECT_EQ(std::string_view{ program.data() + 14u }, "one");
 }
 
+TEST(EnumSpecEncoding, ConditionalAllowsOnlyFalseBranchWithoutMaterializingATrueGroup)
+{
+  // A stored conditional may legitimately omit its true branch and still encode as GroupIf with a zero-count if block plus Else.
+  TestEnumDef enum_def{};
+
+  TestItemId const false_pair_id{ add_pair(enum_def, 0x01u, "one") };
+  TestItemId const false_named_id{ add_named(enum_def, false_pair_id) };
+  TestItemId const false_cmds_id{ add_cmd(enum_def, false_named_id) };
+  TestItemId const false_group_id{ add_group(enum_def, false_cmds_id) };
+
+  TestItemId const conditional_id{
+    add_conditional(enum_def, 0x80u, 0x0Fu, 0u, false_group_id)
+  };
+
+  TestProgram program{};
+  Constexpr::impl::ProgramWriter writer{ program };
+  TestEncoder encoder{ enum_def, writer };
+
+  enum_def.item<TestConditional>(conditional_id).encode(encoder);
+  writer.finish(program);
+
+  ASSERT_EQ(program.size(), 9u);
+  EXPECT_EQ(
+    static_cast<unsigned char>(program[0]),
+    static_cast<unsigned char>(eEnumCommand::GroupIf));
+  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
+  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+  EXPECT_EQ(static_cast<unsigned char>(program[3]), static_cast<unsigned char>(eEnumCommand::Else));
+  EXPECT_EQ(static_cast<unsigned char>(program[4]), 0x01u);
+  EXPECT_EQ(std::string_view{ program.data() + 5u }, "one");
+}
+
 TEST(EnumSpecEncoding, ConditionalCommandBranchCountsStoredCommandsNotPairContinuations)
 {
   // A command-style conditional branch counts stored command entries in its If_CmdCount field,
@@ -585,6 +814,497 @@ TEST(EnumSpecBuilder, BuildsConditionalBranchesThroughTypedScopes)
   auto const& else_numeric{ enum_def.item<TestNumeric>(else_cmds.command_id) };
   EXPECT_EQ(else_numeric.mask, 0x0Fu);
   EXPECT_EQ(enum_def.get_string(else_numeric.name_id), "bits");
+}
+
+TEST(EnumSpecBuilder, CanonicalizesEmptyConditionalBranches)
+{
+  // Empty leading branches should normalize to the opposite condition, empty trailing else branches should disappear, and fully empty conditionals should fail.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Else()
+          .Named(TestEnum{ 0x01u }, "one")
+        .End()
+        .Build()
+    };
+
+    auto const& root{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+    auto const& conditional{ enum_def.item<TestConditional>(root.command_id) };
+    EXPECT_EQ(conditional.true_group_id, 0u);
+    EXPECT_NE(conditional.false_group_id, 0u);
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x01u }), "one");
+  }
+
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .IfNot(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Else()
+          .Named(TestEnum{ 0x01u }, "one")
+        .End()
+        .Build()
+    };
+
+    auto const& root{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+    auto const& conditional{ enum_def.item<TestConditional>(root.command_id) };
+    EXPECT_NE(conditional.true_group_id, 0u);
+    EXPECT_EQ(conditional.false_group_id, 0u);
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x81u }), "one");
+  }
+
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+          .Named(TestEnum{ 0x01u }, "one")
+        .Else()
+        .End()
+        .Build()
+    };
+
+    auto const& root{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+    auto const& conditional{ enum_def.item<TestConditional>(root.command_id) };
+    EXPECT_NE(conditional.true_group_id, 0u);
+    EXPECT_EQ(conditional.false_group_id, 0u);
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x81u }), "one");
+  }
+
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+      .End()
+      .Build(),
+    ""
+  );
+
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+      .Else()
+      .End()
+      .Build(),
+    ""
+  );
+#endif
+}
+
+TEST(EnumSpecDecode, HeaderOnlyProgramBuildsEmptyEnum)
+{
+  // The one-byte storage header is the minimum valid program and should decode to an empty enum.
+  std::string const program{
+    static_cast<char>(storage_header_for<TestEnum>())
+  };
+
+  TestEnumDef const enum_def{ decode_program(program) };
+
+  EXPECT_EQ(enum_def.cmds_id(), 0u);
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x00u }), "");
+}
+
+TEST(EnumSpecDecode, RejectsEmptyInputAndHeaderMismatch)
+{
+  // Decoding requires at least the header byte, and that header must match the destination value type.
+  EXPECT_THROW((void)decode_program(std::string_view{}), Constexpr::EnumParseEmptyInput);
+
+  std::string const wrong_header{
+    static_cast<char>(storage_header_for<std::uint16_t>())
+  };
+  EXPECT_THROW((void)decode_program(wrong_header), Constexpr::EnumParseHeaderMismatch);
+}
+
+TEST(EnumSpecDecode, DecodesSimpleNamedMaskedNamedAndNumericCommands)
+{
+  // The decoder should rebuild the direct Named/Numeric command forms and preserve their stored payloads.
+  std::string const named_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Named) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+      writer.write_c_string("one");
+      writer.write_int(static_cast<std::uint8_t>(0x02u));
+      writer.write_c_string("two");
+    })
+  };
+
+  TestEnumDef const named_enum{ decode_program(named_program) };
+  auto const& named_root_cmds{ named_enum.item<TestCmds>(named_enum.cmds_id()) };
+  auto const& named{ named_enum.item<TestNamed>(named_root_cmds.command_id) };
+  EXPECT_FALSE(named.has_mask);
+  EXPECT_EQ(count_pairs(named_enum, named.pairs_id), 2u);
+  EXPECT_EQ(named_enum.get_string(named_enum.item<TestPairs>(named.pairs_id).name_id), "one");
+
+  std::string const masked_named_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Named) |
+        static_cast<unsigned char>(eEnumCommand::fHasBitmask)));
+      writer.write_int(static_cast<std::uint8_t>(0x03u));
+      writer.write_int(static_cast<std::uint8_t>(0x02u));
+      writer.write_c_string("two");
+    })
+  };
+
+  TestEnumDef const masked_named_enum{ decode_program(masked_named_program) };
+  auto const& masked_root_cmds{ masked_named_enum.item<TestCmds>(masked_named_enum.cmds_id()) };
+  auto const& masked_named{ masked_named_enum.item<TestNamed>(masked_root_cmds.command_id) };
+  EXPECT_TRUE(masked_named.has_mask);
+  EXPECT_EQ(masked_named.mask, 0x03u);
+  EXPECT_EQ(render_enum(masked_named_enum, TestEnum{ 0x02u }), "two");
+
+  std::string const numeric_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Numeric) |
+        static_cast<unsigned char>(eEnumCommand::fRightShiftBits)));
+      writer.write_int(static_cast<std::uint8_t>(0x30u));
+      writer.write_c_string("bits");
+    })
+  };
+
+  TestEnumDef const numeric_enum{ decode_program(numeric_program) };
+  auto const& numeric_root_cmds{ numeric_enum.item<TestCmds>(numeric_enum.cmds_id()) };
+  auto const& numeric{ numeric_enum.item<TestNumeric>(numeric_root_cmds.command_id) };
+  EXPECT_EQ(numeric.mask, 0x30u);
+  EXPECT_EQ(render_enum(numeric_enum, TestEnum{ 0x10u }), "bits=1");
+}
+
+TEST(EnumSpecDecode, DecodesGroupIfCommandBranches)
+{
+  // Command-shaped conditional branches should rebuild as stored Groups containing command lists.
+  TestEnumDef const source{
+    Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Named(TestEnum{ 0x01u }, "one", TestEnum{ 0x03u })
+      .End()
+      .Build()
+  };
+
+  TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& conditional{ decoded.item<TestConditional>(root.command_id) };
+  ASSERT_NE(conditional.true_group_id, 0u);
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x81u }), "one");
+}
+
+TEST(EnumSpecDecode, DecodesGroupIfNamedBranchesAndPairStyleElse)
+{
+  // Inline named conditional branches and pair-style else branches should both rebuild into stored group wrappers.
+  TestEnumDef const source{
+    Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
+        .Named(TestEnum{ 0x01u }, "one")
+      .Else("elseg")
+        .Named(TestEnum{ 0x02u }, "two")
+      .End()
+      .Build()
+  };
+
+  TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& conditional{ decoded.item<TestConditional>(root.command_id) };
+  ASSERT_NE(conditional.true_group_id, 0u);
+  ASSERT_NE(conditional.false_group_id, 0u);
+  EXPECT_NE(decoded.item<TestGroup>(conditional.true_group_id).cmds_id, 0u);
+  EXPECT_NE(decoded.item<TestGroup>(conditional.false_group_id).cmds_id, 0u);
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x81u }), "one");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x02u }), "two");
+}
+
+TEST(EnumSpecDecode, DecodesGroupIfNumericBranchesAndCommandElse)
+{
+  // Inline numeric branches should decode back into Group -> Cmds -> Numeric, with the else branch still attached to the same conditional.
+  TestEnumDef const source{
+    Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x30u })
+        .Numeric(TestEnum{ 0x30u }, "bits", eEnumCommand::fRightShiftBits)
+      .Else("elseg")
+        .Named(TestEnum{ 0x00u }, "zero")
+      .End()
+      .Build()
+  };
+
+  TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& conditional{ decoded.item<TestConditional>(root.command_id) };
+  auto const& numeric_group{ decoded.item<TestGroup>(conditional.true_group_id) };
+  auto const& numeric_cmds{ decoded.item<TestCmds>(numeric_group.cmds_id) };
+  EXPECT_NE(decoded.item_if<TestNumeric>(numeric_cmds.command_id), nullptr);
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x90u }), "bits=1");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x00u }), "zero");
+}
+
+TEST(EnumSpecDecode, DecodesPairContinueScopeExtensions)
+{
+  // A Named branch that overflowed its first pair block should decode back into one linked pair chain.
+  TestEnumDef const source{
+    [] {
+      TestEnumDef enum_def{};
+      TestItemId const pairs_id{ add_pair_chain(enum_def, 17) };
+      TestItemId const named_id{ add_named(enum_def, pairs_id) };
+      enum_def.set_cmds_id(add_cmd(enum_def, named_id));
+      return enum_def;
+    }()
+  };
+
+  TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& named{ decoded.item<TestNamed>(root.command_id) };
+  EXPECT_EQ(count_pairs(decoded, named.pairs_id), 17u);
+}
+
+TEST(EnumSpecDecode, DecodesCommandContinueScopeExtensions)
+{
+  // Command branches that overflow their first GroupIf block should decode back into one linked command chain.
+  LargeTestEnumDef const source{
+    [] {
+      LargeTestEnumDef enum_def{};
+      TestItemId first_cmd_id{};
+      TestItemId last_cmd_id{};
+
+      for (int i{}; i < 17; ++i) {
+        char const name[]{
+          static_cast<char>('a' + (i % 26)),
+          '\0',
+        };
+        TestItemId const numeric_id{
+          enum_def.add_item(TestNumeric{
+            static_cast<TestEnum>(1u << (i % 7)),
+            eEnumCommand{},
+            enum_def.add_string(std::string_view{ name, 1 }),
+          })
+        };
+        TestItemId const cmds_id{ enum_def.add_item(TestCmds{ numeric_id, {} }) };
+        if (!first_cmd_id) {
+          first_cmd_id = cmds_id;
+        } else {
+          enum_def.item<TestCmds>(last_cmd_id).next_id = cmds_id;
+        }
+        last_cmd_id = cmds_id;
+      }
+
+      TestItemId const group_id{ enum_def.add_item(TestGroup{ {}, first_cmd_id }) };
+      TestItemId const conditional_id{
+        enum_def.add_item(TestConditional{ 0x80u, 0xFFu, group_id, 0u })
+      };
+      enum_def.set_cmds_id(enum_def.add_item(TestCmds{ conditional_id, {} }));
+      return enum_def;
+    }()
+  };
+
+  LargeTestEnumDef const decoded{ decode_program<LargeTestSettings>(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& conditional{ decoded.item<TestConditional>(root.command_id) };
+  auto const& group{ decoded.item<TestGroup>(conditional.true_group_id) };
+  EXPECT_EQ(count_commands(decoded, group.cmds_id), 17u);
+}
+
+TEST(EnumSpecDecode, DecodesCompressedNestedValuesAndZeroCountConditionalBranches)
+{
+  // Manual streams should decode compressed constrained values, and zero-count GroupIf* branches should not materialize empty Group objects.
+  bool constexpr compress{ true };
+  TestEnum const root_scope{ static_cast<TestEnum>(~TestEnum{ 0u }) };
+
+  std::string const compressed_program{
+    build_manual_program(storage_header_for<TestEnum>(compress), [&](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::GroupIfNamed) | 0x01u));
+      write_scoped_value(writer, TestEnum{ 0x80u }, root_scope, compress);
+      write_scoped_value(writer, TestEnum{ 0x70u }, root_scope, compress);
+      write_scoped_value(writer, TestEnum{ 0x10u }, TestEnum{ 0x70u }, compress);
+      writer.write_c_string("hi");
+    })
+  };
+
+  TestEnumDef const compressed_enum{ decode_program(compressed_program) };
+  EXPECT_EQ(render_enum(compressed_enum, TestEnum{ 0x90u }), "hi");
+
+  std::string const zero_count_cmd_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::GroupIf);
+      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu));
+    })
+  };
+
+  TestEnumDef const zero_count_cmd_enum{ decode_program(zero_count_cmd_program) };
+  EXPECT_EQ(zero_count_cmd_enum.cmds_id(), 0u);
+  EXPECT_EQ(render_enum(zero_count_cmd_enum, TestEnum{ 0x80u }), "");
+
+  std::string const zero_count_named_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::GroupIfNamed);
+      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu));
+    })
+  };
+
+  TestEnumDef const zero_count_named_enum{ decode_program(zero_count_named_program) };
+  EXPECT_EQ(zero_count_named_enum.cmds_id(), 0u);
+  EXPECT_EQ(render_enum(zero_count_named_enum, TestEnum{ 0x80u }), "");
+
+  std::string const zero_count_with_else_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::GroupIf);
+      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu));
+      writer.write_opcode(eEnumCommand::Else);
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+      writer.write_c_string("one");
+    })
+  };
+
+  TestEnumDef const zero_count_with_else_enum{ decode_program(zero_count_with_else_program) };
+  auto const& zero_count_with_else_root{ zero_count_with_else_enum.item<TestCmds>(zero_count_with_else_enum.cmds_id()) };
+  auto const& zero_count_with_else_conditional{
+    zero_count_with_else_enum.item<TestConditional>(zero_count_with_else_root.command_id)
+  };
+  EXPECT_EQ(zero_count_with_else_conditional.true_group_id, 0u);
+  EXPECT_NE(zero_count_with_else_conditional.false_group_id, 0u);
+  EXPECT_EQ(render_enum(zero_count_with_else_enum, TestEnum{ 0x01u }), "one");
+}
+
+TEST(EnumSpecDecode, RoundTripsStoredFalseOnlyConditionalBranches)
+{
+  // A stored conditional with no true group should round-trip through the encoder and decoder without inventing a fake empty group.
+  TestEnumDef const source{
+    [] {
+      TestEnumDef enum_def{};
+
+      TestItemId const false_pair_id{ add_pair(enum_def, 0x01u, "one") };
+      TestItemId const false_named_id{ add_named(enum_def, false_pair_id) };
+      TestItemId const false_cmds_id{ add_cmd(enum_def, false_named_id) };
+      TestItemId const false_group_id{ add_group(enum_def, false_cmds_id) };
+      TestItemId const conditional_id{
+        add_conditional(enum_def, 0x80u, 0x0Fu, 0u, false_group_id)
+      };
+      enum_def.set_cmds_id(add_cmd(enum_def, conditional_id));
+      return enum_def;
+    }()
+  };
+
+  TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& conditional{ decoded.item<TestConditional>(root.command_id) };
+  EXPECT_EQ(conditional.true_group_id, 0u);
+  EXPECT_NE(conditional.false_group_id, 0u);
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x01u }), "one");
+}
+
+TEST(EnumSpecDecode, OwnsCopiedStringsAndRoundTripsRenderedBehavior)
+{
+  // The decoder should copy incoming strings into the enum heap and preserve rendered behavior after a headered round-trip.
+  TestEnumDef const source{
+    Constexpr::build_enum_description<TestSettings>()
+      .Named(TestEnum{ 0x01u }, "A", TestEnum{ 0x01u })
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x30u })
+        .Numeric(TestEnum{ 0x30u }, "bits", eEnumCommand::fRightShiftBits)
+      .Else("elseg")
+        .Named(TestEnum{ 0x00u }, "ZERO")
+      .End()
+      .Build()
+  };
+
+  std::string program{ encode_program_with_header(source) };
+  TestEnumDef const decoded{ decode_program(program) };
+
+  program.assign(program.size(), 'x');
+
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x91u }), "A, bits=1");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x00u }), "ZERO");
+}
+
+TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
+{
+  // Malformed streams should surface through the public parse-error family with specific diagnostics where practical.
+  std::string const truncated_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::Named);
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+    })
+  };
+  EXPECT_THROW((void)decode_program(truncated_program), Constexpr::EnumParseUnexpectedEof);
+
+  std::string const invalid_numeric_opcode{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Numeric) | 0x08u));
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu));
+      writer.write_c_string("bits");
+    })
+  };
+  EXPECT_THROW((void)decode_program(invalid_numeric_opcode), Constexpr::EnumParseInvalidOpcode);
+
+  std::string const misplaced_else{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Else) | 0x00u));
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+      writer.write_c_string("one");
+    })
+  };
+  EXPECT_THROW((void)decode_program(misplaced_else), Constexpr::EnumParseInvalidStructure);
+
+  std::string const misplaced_continue{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::ContinueScope);
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+      writer.write_c_string("one");
+    })
+  };
+  EXPECT_THROW((void)decode_program(misplaced_continue), Constexpr::EnumParseInvalidStructure);
+
+  std::string const bytes_after_terminate{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::Terminate);
+      writer.write_opcode(eEnumCommand::Named);
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+      writer.write_c_string("one");
+    })
+  };
+  EXPECT_THROW((void)decode_program(bytes_after_terminate, false), Constexpr::EnumParseInvalidStructure);
+
+  std::string const duplicate_masked_values{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Named) |
+        static_cast<unsigned char>(eEnumCommand::fHasBitmask) |
+        0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x03u));
+      writer.write_int(static_cast<std::uint8_t>(0x00u));
+      writer.write_c_string("D");
+      writer.write_int(static_cast<std::uint8_t>(0x00u));
+      writer.write_c_string("E");
+    })
+  };
+  EXPECT_THROW((void)decode_program(duplicate_masked_values), Constexpr::EnumParseInvalidStructure);
+
+  std::string oversized_name{
+    static_cast<char>(storage_header_for<TestEnum>())
+  };
+  oversized_name.push_back(static_cast<char>(eEnumCommand::Named));
+  oversized_name.push_back(static_cast<char>(0x01u));
+  oversized_name.append(128u, 'x');
+  oversized_name.push_back('\0');
+  EXPECT_THROW((void)decode_program(oversized_name), Constexpr::EnumParseCapacityExceeded);
+
+  std::string const header_only{
+    static_cast<char>(storage_header_for<TestEnum>())
+  };
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .Named(TestEnum{ 0x01u }, "one")
+      .decode_program(header_only)
+      .Build(),
+    ""
+  );
+#endif
 }
 
 TEST(EnumSpecRender, RendersNonzeroNamedCountsWithoutExtraSeparators)
@@ -805,13 +1525,17 @@ TEST(EnumSpecRender, MergesConditionalGroupOutputWithoutRenderingGroupNames)
 TEST(EnumSpecBuilder, RejectsDuplicateNamedValuesWithinOneMaskedGroup)
 {
   // Reusing one masked enum value inside the same Named block should be rejected instead of producing two names.
-  EXPECT_THROW(
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  EXPECT_DEATH(
     (void)Constexpr::build_enum_description<TestSettings>()
       .Named(TestEnum{ 0x00u }, "D", TestEnum{ 0x0Cu })
       .Named(TestEnum{ 0x00u }, "E", TestEnum{ 0x0Cu })
       .Build(),
-    std::invalid_argument
+    ""
   );
+#endif
 }
 
 } // namespace
