@@ -242,7 +242,7 @@ Constexpr::Enum<Settings> decode_program(std::string_view program, bool throw_on
 
 /**
  * @brief Decodes one runtime enum stream through the variant-backed
- * runtime-selected builder chain.
+ *   runtime-selected builder chain.
  *
  * @tparam StringAndItemCapacity - Fixed backing storage capacity for the
  *   variant-backed runtime-selected decode result.
@@ -262,29 +262,8 @@ Constexpr::AnyEnumDescription<StringAndItemCapacity> decode_any_program(
 }
 
 /**
- * @brief Renders one runtime value through a variant-backed runtime-selected
- * enum description.
- *
- * @tparam StringAndItemCapacity - Fixed backing storage capacity of the
- *   variant-backed runtime-selected enum description.
- * @param enum_def - Variant-backed runtime-selected enum description.
- * @param value - Raw runtime value widened to an unsigned helper type.
- * @return std::string - Rendered output text.
- */
-template <std::uint32_t StringAndItemCapacity>
-std::string render_any_enum(
-  Constexpr::AnyEnumDescription<StringAndItemCapacity> const& enum_def,
-  std::uint64_t value)
-{
-  return enum_def.visit([&](auto const& typed_enum) {
-    using Value = typename std::decay_t<decltype(typed_enum)>::value_type;
-    return render_enum_value(typed_enum, static_cast<Value>(value));
-  });
-}
-
-/**
  * @brief Writes one constrained integer in either full-width or condensed form
- * for manual decoder tests.
+ *   for manual decoder tests.
  *
  * @tparam ValueT - Enum or integral value type.
  * @param writer - Destination program writer.
@@ -1042,6 +1021,7 @@ TEST(EnumSpecAnyDecode, HeaderOnlyProgramsDispatchAllStorageKinds)
 
     auto const any_enum{ decode_any_program(program) };
     EXPECT_EQ(any_enum.storage_type(), Constexpr::impl::storage_type_for_value_type<ValueT>());
+    EXPECT_EQ(any_enum.is_signed(), std::is_signed_v<ValueT>);
     EXPECT_EQ(any_enum.program_size(), program.size());
     EXPECT_EQ(any_enum.output_program(), program);
   };
@@ -1056,20 +1036,57 @@ TEST(EnumSpecAnyDecode, HeaderOnlyProgramsDispatchAllStorageKinds)
   expect_header_only(std::uint64_t{});
 }
 
-TEST(EnumSpecAnyDecode, RoundTripsProgramsAndVisitsTheActiveTypedDescription)
+TEST(EnumSpecAnyDecode, RoundTripsProgramsAndRendersThroughFacadeValueViews)
 {
-  // The variant-backed runtime-selected wrapper should re-emit the original stream and allow repeated rendering through visit().
+  // The variant-backed runtime-selected wrapper should re-emit the original stream and render through explicit unsigned value views without exposing visit() on the common path.
   std::string const program{ kDecodeProgramSv };
   AnyTestEnumDef const any_enum{ decode_any_program(program) };
 
   EXPECT_EQ(any_enum.storage_type(), eEnumStorageType::UInt8);
+  EXPECT_FALSE(any_enum.is_signed());
   EXPECT_EQ(any_enum.output_program(), program);
-  EXPECT_EQ(render_any_enum(any_enum, 0x01u), "one");
-  EXPECT_EQ(render_any_enum(any_enum, 0x02u), "two");
+  EXPECT_EQ(any_enum.value_unsigned(0x01u).to_string(), "one");
+  EXPECT_EQ(any_enum.value_unsigned(0x02u).to_string(), "two");
+  EXPECT_EQ(any_enum.visit([&](auto const& typed_enum) {
+    using value_type = typename std::decay_t<decltype(typed_enum)>::value_type;
+    return render_enum_value(typed_enum, static_cast<value_type>(0x02u));
+  }), "two");
+
+  std::ostringstream value_stream{};
+  EXPECT_EQ(&(value_stream << any_enum.value_unsigned(0x02u)), &value_stream);
+  EXPECT_EQ(value_stream.str(), "two");
 
   std::ostringstream stream{};
   EXPECT_EQ(&any_enum.output_program(stream), &stream);
   EXPECT_EQ(stream.str(), program);
+}
+
+TEST(EnumSpecAnyDecode, ValidatesSignednessAndRuntimeValueRanges)
+{
+  // The runtime-selected facade should require the matching signed or unsigned entrypoint and reject out-of-range values before rendering.
+  std::string const unsigned_program{ kDecodeProgramSv };
+  AnyTestEnumDef const unsigned_enum{ decode_any_program(unsigned_program) };
+
+  EXPECT_THROW((void)unsigned_enum.value_signed(1), std::invalid_argument);
+  EXPECT_THROW((void)unsigned_enum.value_unsigned(0x100u), std::out_of_range);
+
+  std::string const signed_program{
+    build_manual_program(storage_header_for<std::int8_t>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::Named);
+      writer.write_int(static_cast<std::int8_t>(-1));
+      writer.write_c_string("minus one");
+    })
+  };
+  auto const signed_enum{ decode_any_program(signed_program) };
+
+  EXPECT_TRUE(signed_enum.is_signed());
+  EXPECT_EQ(signed_enum.value_signed(-1).to_string(), "minus one");
+  EXPECT_THROW((void)signed_enum.value_unsigned(0xFFu), std::invalid_argument);
+  EXPECT_THROW((void)signed_enum.value_signed(128), std::out_of_range);
+
+  std::ostringstream signed_stream{};
+  EXPECT_EQ(&(signed_stream << signed_enum.value_signed(-1)), &signed_stream);
+  EXPECT_EQ(signed_stream.str(), "minus one");
 }
 
 TEST(EnumSpecAnyDecode, HonorsConfiguredStringAndItemCapacities)

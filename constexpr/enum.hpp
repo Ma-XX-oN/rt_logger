@@ -262,6 +262,12 @@ namespace Constexpr {
   template <typename EnumT>
   class EnumValueView;
 
+  template <std::uint32_t StringAndItemCapacity>
+  class AnyEnumDescription;
+
+  template <typename AnyEnumT>
+  class AnyEnumValueView;
+
   constexpr std::uint32_t reserve_space(std::uint16_t string_space, std::uint16_t item_space) {
     return static_cast<std::uint32_t>(string_space) | (static_cast<std::uint32_t>(item_space) << 16);
   }
@@ -3877,7 +3883,8 @@ namespace Constexpr {
   >;
 
   /**
-   * @brief Runtime-erased wrapper around one decoded typed enum description.
+   * @brief Variant-backed runtime-selected wrapper around one decoded typed
+   *   enum description.
    *
    * @tparam StringAndItemCapacity - Fixed backing storage capacity shared by
    *   all typed alternatives.
@@ -3894,6 +3901,7 @@ namespace Constexpr {
       Enum<DefaultEnumSettings<std::uint32_t, StringAndItemCapacity>>,
       Enum<DefaultEnumSettings<std::uint64_t, StringAndItemCapacity>>
     >;
+    using value_view_type = AnyEnumValueView<AnyEnumDescription<StringAndItemCapacity>>;
 
     eEnumStorageType m_storage_type{};
     variant_type m_enum;
@@ -3926,6 +3934,32 @@ namespace Constexpr {
     }
 
     /**
+     * @brief Returns whether the active decoded value type is signed.
+     *
+     * @return bool - \c true when the active by-wire value type is signed.
+     */
+    constexpr bool is_signed() const noexcept {
+      switch (storage_type()) {
+        case eEnumStorageType::Int8:
+        case eEnumStorageType::Int16:
+        case eEnumStorageType::Int32:
+        case eEnumStorageType::Int64:
+          return true;
+        case eEnumStorageType::UInt8:
+        case eEnumStorageType::UInt16:
+        case eEnumStorageType::UInt32:
+        case eEnumStorageType::UInt64:
+          return false;
+        case eEnumStorageType::Compress:
+          assert(false && "Impossible: AnyEnumDescription stores only the base storage discriminator.");
+          return false;
+      }
+
+      assert(false && "AnyEnumDescription must store a valid base storage discriminator.");
+      return false;
+    }
+
+    /**
      * @brief Visits the active typed enum description.
      *
      * @tparam Visitor - Callable visitor type accepted by `std::visit`.
@@ -3935,6 +3969,68 @@ namespace Constexpr {
     template <class Visitor>
     decltype(auto) visit(Visitor&& visitor) const {
       return std::visit(std::forward<Visitor>(visitor), m_enum);
+    }
+
+    /**
+     * @brief Binds one runtime unsigned value to this runtime-selected enum
+     *   description for rendering.
+     *
+     * @param enum_value - Unsigned runtime value to interpret.
+     * @return value_view_type - Streamable render view.
+     *
+     * @throws std::invalid_argument when the decoded enum value type is signed.
+     * @throws std::out_of_range when \p enum_value does not fit the decoded
+     *   unsigned storage width.
+     */
+    value_view_type value_unsigned(std::uint64_t enum_value) const {
+      return visit([&](auto const& typed_enum) -> value_view_type {
+        using typed_enum_type = std::decay_t<decltype(typed_enum)>;
+        using value_type = typename typed_enum_type::value_type;
+        using unsigned_value_type = unsigned_equivalent_t<value_type>;
+
+        if constexpr (std::is_signed_v<value_type>) {
+          throw std::invalid_argument("value_unsigned() requires an unsigned runtime-selected enum description.");
+        } else {
+          if (enum_value > static_cast<std::uint64_t>(std::numeric_limits<unsigned_value_type>::max())) {
+            throw std::out_of_range("Unsigned runtime value is out of range for the decoded enum storage width.");
+          }
+          return value_view_type{ *this, static_cast<std::uint64_t>(static_cast<unsigned_value_type>(enum_value)) };
+        }
+      });
+    }
+
+    /**
+     * @brief Binds one runtime signed value to this runtime-selected enum
+     *   description for rendering.
+     *
+     * @param enum_value - Signed runtime value to interpret.
+     * @return value_view_type - Streamable render view.
+     *
+     * @throws std::invalid_argument when the decoded enum value type is
+     *   unsigned.
+     * @throws std::out_of_range when \p enum_value does not fit the decoded
+     *   signed storage width.
+     */
+    value_view_type value_signed(std::int64_t enum_value) const {
+      return visit([&](auto const& typed_enum) -> value_view_type {
+        using typed_enum_type = std::decay_t<decltype(typed_enum)>;
+        using value_type = typename typed_enum_type::value_type;
+        using unsigned_value_type = unsigned_equivalent_t<value_type>;
+
+        if constexpr (!std::is_signed_v<value_type>) {
+          throw std::invalid_argument("value_signed() requires a signed runtime-selected enum description.");
+        } else {
+          if (enum_value < static_cast<std::int64_t>(std::numeric_limits<value_type>::min())
+            || enum_value > static_cast<std::int64_t>(std::numeric_limits<value_type>::max()))
+          {
+            throw std::out_of_range("Signed runtime value is out of range for the decoded enum storage width.");
+          }
+          return value_view_type{
+            *this,
+            static_cast<std::uint64_t>(static_cast<unsigned_value_type>(static_cast<value_type>(enum_value)))
+          };
+        }
+      });
     }
 
     /**
@@ -4013,8 +4109,106 @@ namespace Constexpr {
   };
 
   /**
+   * @brief Streamable render view for one runtime-selected enum description and
+   *   bound runtime value.
+   *
+   * @tparam AnyEnumT - Immutable runtime-selected enum description type.
+   */
+  template <typename AnyEnumT>
+  class AnyEnumValueView {
+    AnyEnumT const* m_enum_def{};
+    std::uint64_t m_value_bits{};
+
+    /**
+     * @brief Rebuilds one active typed integer value from stored raw bits.
+     *
+     * @tparam ValueT - Active integral value type selected by the wrapped
+     *   description.
+     * @param value_bits - Raw by-wire bits widened to 64 bits.
+     * @return ValueT - Value narrowed back to the active typed width and
+     *   signedness.
+     */
+    template <typename ValueT>
+    static constexpr ValueT typed_value_from_bits(std::uint64_t value_bits) noexcept {
+      static_assert(std::is_integral_v<ValueT>, "AnyEnumValueView requires integral runtime-selected value types.");
+      using unsigned_value_type = unsigned_equivalent_t<ValueT>;
+
+      unsigned_value_type const narrowed_bits{ static_cast<unsigned_value_type>(value_bits) };
+      if constexpr (std::is_signed_v<ValueT>) {
+        auto const signed_value{
+          impl::sign_extend(narrowed_bits, std::numeric_limits<unsigned_value_type>::digits - 1u)
+        };
+        return static_cast<ValueT>(signed_value);
+      } else {
+        return static_cast<ValueT>(narrowed_bits);
+      }
+    }
+
+  public:
+    /**
+     * @brief Constructs a render view for one runtime-selected enum
+     *   description and runtime value bits.
+     *
+     * @param enum_def - Immutable runtime-selected enum description.
+     * @param value_bits - Runtime value already normalized to the decoded
+     *   storage width.
+     */
+    constexpr AnyEnumValueView(AnyEnumT const& enum_def, std::uint64_t value_bits) noexcept
+    : m_enum_def(&enum_def)
+    , m_value_bits(value_bits)
+    {
+    }
+
+    /**
+     * @brief Returns the referenced runtime-selected enum description.
+     *
+     * @return AnyEnumT const& - Bound runtime-selected enum description.
+     */
+    constexpr AnyEnumT const& enum_def() const noexcept {
+      return *m_enum_def;
+    }
+
+    /**
+     * @brief Returns the stored normalized value bits.
+     *
+     * @return std::uint64_t - Runtime value widened to 64 bits.
+     */
+    constexpr std::uint64_t value_bits() const noexcept {
+      return m_value_bits;
+    }
+
+    /**
+     * @brief Renders the bound runtime-selected enum description and runtime
+     *   value into text.
+     *
+     * @return std::string - Final rendered text.
+     */
+    std::string to_string() const {
+      return enum_def().visit([&](auto const& typed_enum) {
+        using typed_enum_type = std::decay_t<decltype(typed_enum)>;
+        using value_type = typename typed_enum_type::value_type;
+        return typed_enum.value(typed_value_from_bits<value_type>(value_bits())).to_string();
+      });
+    }
+  };
+
+  /**
+   * @brief Streams one rendered runtime-selected enum value view.
+   *
+   * @tparam AnyEnumT - Immutable runtime-selected enum description type.
+   * @param stream - Destination output stream.
+   * @param value_view - Runtime-selected enum description plus runtime value
+   *   view.
+   * @return std::ostream& - Destination output stream.
+   */
+  template <typename AnyEnumT>
+  std::ostream& operator<<(std::ostream& stream, AnyEnumValueView<AnyEnumT> const& value_view) {
+    return stream << value_view.to_string();
+  }
+
+  /**
    * @brief Builder-like entrypoint for decoding variant-backed
-   * runtime-selected enum descriptions from transmitted programs.
+   *   runtime-selected enum descriptions from transmitted programs.
    *
    * @tparam StringAndItemCapacity - Fixed backing storage capacity shared by
    *   all typed alternatives.
@@ -4120,7 +4314,7 @@ namespace Constexpr {
 
   /**
    * @brief Creates an empty variant-backed runtime-selected enum decode
-   * builder.
+   *   builder.
    *
    * @tparam StringAndItemCapacity - Fixed backing storage capacity shared by
    *   all typed alternatives.
@@ -4144,6 +4338,7 @@ namespace Constexpr {
  *    .Named(TestEnum{ 0x01u }, "one")
  *    .Named(TestEnum{ 0x02u }, "two")
  * );
+ * ```
  */
 #define BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                          \
   (Constexpr::build_enum_description<                                                \

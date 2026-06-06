@@ -194,7 +194,9 @@ the matching typed decoder, and stores the result in `AnyEnumDescription<StringA
 private `std::variant` of the 8 concrete signed and unsigned integer enum-description types.
 
 That means the receiver parses the transmitted program once, keeps the decoded description, and then reuses it through
-`visit(...)`, `program_size(...)`, and `output_program(...)` without reparsing the original bytes.
+`is_signed()`, `value_unsigned(...)`, `value_signed(...)`, `program_size(...)`, and `output_program(...)` without
+reparsing the original bytes. `visit(...)` remains available as an advanced escape hatch when a caller truly needs the
+active typed description.
 
 A future implementation could still move to a single max-width erased representation if that ever becomes more
 ergonomic than the visitor-based wrapper.
@@ -323,14 +325,18 @@ auto AnyDesc = Constexpr::build_any_enum_description<Constexpr::reserve_space(51
   .decode_program(program)
   .Build();
 
-std::string text{
-  AnyDesc.visit([](auto const& TypedDesc) {
-    using Value = typename std::decay_t<decltype(TypedDesc)>::value_type;
-    return TypedDesc(static_cast<Value>(0x01u)).to_string();
-  })
-};
+std::string text;
+if (AnyDesc.is_signed()) {
+  text = AnyDesc.value_signed(0x01).to_string();
+} else {
+  text = AnyDesc.value_unsigned(0x01u).to_string();
+}
 // text == "BUSY"
 ```
+
+Use `value_unsigned(...)` for unsigned-by-wire descriptions and `value_signed(...)`
+for signed-by-wire descriptions. `visit(...)` is still there for advanced typed
+access, but it does not need to be the normal rendering path.
 
 ### 5. Re-Emit A Program Into A Fixed Buffer
 
