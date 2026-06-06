@@ -341,6 +341,10 @@ The short version is:
   bytecode program
 - the stream carries explicit conditional scope through `GroupIf*` block headers
 - the packet format stores that program in the enum block payload
+- the public round-trip surface is:
+  - `BUILD_ENUM_DESCRIPTION(...)` or `build_enum_description<Settings>() ... .Build()`
+  - `.decode_program(program_sv, throw_on_terminate).Build()` for decode
+  - `Enum::program_size()` and `Enum::output_program(...)` for re-emission
 
 ### Packet Design
 

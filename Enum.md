@@ -10,7 +10,18 @@
     - [Output Format](#output-format)
     - [Encoding Format](#encoding-format)
     - [Type Erasure](#type-erasure)
-- [Potential Usage Examples](#potential-usage-examples)
+- [Usage Examples](#usage-examples)
+  - [Naming Convention Used In These Examples](#naming-convention-used-in-these-examples)
+  - [1. Build An Enum Description](#1-build-an-enum-description)
+  - [2. Render A Runtime Value With That Description](#2-render-a-runtime-value-with-that-description)
+  - [3. Let A Flag Change How Other Bits Are Interpreted](#3-let-a-flag-change-how-other-bits-are-interpreted)
+  - [4. Transmit Enum Semantics To Another Process](#4-transmit-enum-semantics-to-another-process)
+  - [5. Re-Emit A Program Into A Fixed Buffer](#5-re-emit-a-program-into-a-fixed-buffer)
+  - [6. Re-Emit A Program As `std::string` Or To `std::ostream`](#6-re-emit-a-program-as-stdstring-or-to-stdostream)
+  - [7. Reduce Compile-Time Storage With The Macro](#7-reduce-compile-time-storage-with-the-macro)
+- [Future Possible Semantics](#future-possible-semantics)
+  - [1. Reflect Names Back Into Values](#1-reflect-names-back-into-values)
+  - [2. Add Group-Aware Safety Helpers](#2-add-group-aware-safety-helpers)
 - [Enum Stream Specification](#enum-stream-specification)
 - [Possible Render Mechanism](#possible-render-mechanism)
 
@@ -94,14 +105,20 @@ enum eEnumCommand : std::uint8_t {
 The accepted API direction for enum descriptions is:
 
 - `Constexpr::Enum<Settings>` is the public immutable representation type.
+- compile-time and runtime description building starts from:
+  - `build_enum_description<Settings>()`
+  - `BUILD_ENUM_DESCRIPTION(EnumType, ...)` when the default two-pass shrink-to-fit macro is desired
 - runtime and constexpr stream decoding is exposed through the builder chain:
   - `build_enum_description<Settings>().decode_program(program_sv, throw_on_terminate).Build()`
+- stream emission is exposed on `Enum` itself:
+  - `program_size(compress, append_terminate)`
+  - `output_program(char* begin, char* end, compress, append_terminate)`
+  - `output_program(std::ostream& os, compress, append_terminate)`
+  - `output_program(compress, append_terminate)` returning `std::string`
 - `string_id_t` and `item_id_t` are public storage ids in `Constexpr`, defined with the storage layer rather than inside
   enum-encoding internals.
-- The encoding path is split into three roles:
-  - `Enum` for immutable representation storage
-  - `ProgramWriter` for the writable byte sink
-  - `EnumEncoder` for one encoding pass over an `Enum` into a `ProgramWriter`
+- `ProgramWriter` and `EnumEncoder` remain internal low-level helpers. Most callers should use the `Enum` output
+  functions instead of driving the writer and encoder manually.
 - Stored enum items continue to own their `encode(...)` member functions. Scope-introducing block logic remains in a
   free helper instead of being spread across ad-hoc policy objects.
 
@@ -112,7 +129,7 @@ The builder direction is typed chaining rather than lambdas or variadic free-ite
 Reasons:
 
 - chaining keeps builder operations scoped on the builder object, which avoids namespace-lookup friction for helpers
-  such as `Name`, `Number`, `If`, and `Else`
+  such as `Named`, `Numeric`, `If`, and `Else`
 - chaining reads naturally for a declarative enum-description DSL
 - state-typed chaining allows IntelliSense to expose only valid next operations
 
@@ -171,135 +188,214 @@ There should to be a way to specify the width and sign of the underlying type in
 receiver of the Enum program would have to parse the Enum program every time it has to deal with an Enum type that was
 sent by wire.
 
-## Potential Usage Examples
+## Usage Examples
 
-The examples in this section describe the intended builder-facing API for enum
-descriptions. The currently tested low-level stream representation and encoder
-live in `constexpr/enum.hpp`; these examples are design-level usage, not a
-guarantee that this exact front-end surface is available in the current build.
+The examples in this section describe the implemented public surface for
+building, rendering, decoding, and re-emitting enum definition streams.
 
-Simple:
+### Naming Convention Used In These Examples
+
+The examples below use this naming convention:
+
+- `eType` for the enum type itself
+- `TypeDesc` for an enum description object
+- `Value` for ordinary enum values
+- `fValue` for flag bits
+- `mValue` for masks
+
+### 1. Build An Enum Description
+
+If you are only naming distinct enum values, use the plain `Named(value, name)`
+form. Add a mask only when the same storage really contains a masked field.
 
 ```cpp
-enum eTest : std::uint8_t {
-  nothing, something
+enum class eMode : std::uint8_t {
+  Idle = 0x00,
+  Busy = 0x01,
+  Error = 0x02,
 };
-constexpr auto eDisc = build_enum_description<eTest>()
-  .Named(eTest::nothing, "NOTHING")       // named value
-  .Named(eTest::something, "Something")   // another named value
+
+constexpr auto ModeDesc = Constexpr::build_enum_description<
+  Constexpr::DefaultEnumSettings<eMode>
+>()
+  .Named(eMode::Idle, "IDLE")
+  .Named(eMode::Busy, "BUSY")
+  .Named(eMode::Error, "ERROR")
   .Build();
-
-auto eValue = eDisc.value(eDisc["NOTHING"]);
-
-// string value "NOTHING". std::string type.
-auto eText = eValue.to_string();
-
-// Constexpr::string<N> type
-auto sDefStream = eDisc.definition_stream();
-
-auto eNewDesc = build_enum_description<Constexpr::DefaultEnumSettings<std::uint8_t>>()
-  .decode_program(std::string_view{ sDefStream.data(), sDefStream.size() })
-  .Build();
-
-// This does runtime evaluation, so is slower than the assignment to eValue above.
-// Still it's usable and has the same definition as eDisc and the same size.
-auto eNewValue = eNewDesc.value(eNewDesc["NOTHING"]);
-
-assert(eValue.to_int() == eNewValue.to_int());
-
-// Constexpr::string<N> type
-// Gets the stream as if it were an escaped c-string, which can be pasted into a
-// source file to build_enum_description in a constexpr object.
-auto sEscapedDefStream = eDisc.definition_stream_escaped();
 ```
 
-A little more complicated:
+This builds a description of the enum type itself. The resulting `ModeDesc`
+can then interpret runtime values of `eMode` into human readable text.
+
+### 2. Render A Runtime Value With That Description
+
+`Enum::value(...)` returns a streamable view, and `Enum::operator()(...)` is an
+alias for the same thing.
 
 ```cpp
-enum eTest : std::uint8_t {
-  nothing = 0, something = 1,  // this group of values are for group1
-  hello   = 0, goodbye   = 1,  // this group of values are for group2
-  group2 = 0x80, mask = 0x7f
+eMode const value{ eMode::Busy };
+
+std::string text{ ModeDesc.value(value).to_string() };
+// text == "BUSY"
+
+std::ostringstream os{};
+os << ModeDesc(value);
+// os.str() == "BUSY"
+```
+
+### 3. Let A Flag Change How Other Bits Are Interpreted
+
+Use `If(...)`, `Else(...)`, and `End()` when one flag bit changes how the rest
+of the stored bits should be interpreted.
+
+```cpp
+enum class ePacketState : std::uint8_t {
+  fPrimary = 0x80,
+  mKindMask = 0x0F,
 };
-constexpr auto eDisc = build_enum_description<eTest>()
-  .IfNot(eTest::group2, eTest::mask)
-    .Named(eTest::nothing, "NOTHING")
-    .Named(eTest::something, "Something")
-  .Else()
-    .Named(eTest::hello, "hello")
-    .Named(eTest::goodbye, "goodbye")
-    .Numeric(eTest::mask, "value")
+
+auto PacketDesc = Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<ePacketState>>()
+  .If(ePacketState::fPrimary, ePacketState::mKindMask, "primary")
+    .Named(ePacketState{ 0x01 }, "ONE")
+    .Named(ePacketState{ 0x02 }, "TWO")
+  .Else("secondary")
+    .Named(ePacketState{ 0x01 }, "HELLO")
+    .Named(ePacketState{ 0x02 }, "GOODBYE")
   .End()
   .Build();
 
-// Using enums to get and set named values is unsafe when working with groups.
-// Consider:
-//
-//   auto eUnsafe = eDisc.value(eTest::goodbye); // didn't set the group2 bit
-//
-// So we disallow that and use the names instead.
-
-// this is safer as it would set group2 mask bit
-auto eValue = eDisc.value(eDisc["goodbye"]);
-eValue = eDisc["hello"];                          // ok, right group
-eValue = eDisc["NOTHING"];                        // error since not right group
-eValue = set(eTest::group2, 0, eDisc["NOTHING"]); // Set group2 bit to 0 and setting to "NOTHING" value.
-eValue = force_set(eDisc["hello"]);               // force changing group and setting to "hello" value.
-
-assert(eValue.is_active(eTest::group2));
-assert(eValue.from_group(eTest::group2) == eTest::nothing); // true
-assert(eValue.from_group(eTest::group2) == eTest::hello);   // this is also true
-assert(eValue != eDisc["NOTHING"]);                         // safer
-assert(eValue == eDisc["hello"]);
-
-eValue = set(eDisc["value"], 3);       // ok
-eValue = set(eDisc["value"], 1);       // error since 1 is a named value "Something".
-eValue = force_set(eDisc["value"], 1); // ok, forcing set to value 1.
+std::string primary_text{ PacketDesc(ePacketState{ 0x81 }).to_string() };
+std::string secondary_text{ PacketDesc(ePacketState{ 0x01 }).to_string() };
+std::string secondary_goodbye_text{ PacketDesc(ePacketState{ 0x02 }).to_string() };
+// primary_text           == "ONE"
+// secondary_text         == "HELLO"
+// secondary_goodbye_text == "GOODBYE"
 ```
 
-Same complexity but allows direct access to groups by name.
+Here the same low field value `0x01` means different things depending on the
+flag bit:
+
+- `0x81` means `"ONE"` because `fPrimary` selects the primary interpretation
+- `0x01` means `"HELLO"` because `fPrimary` is clear and the secondary
+  interpretation applies instead
+
+The branch names `"primary"` and `"secondary"` are optional. They are not
+rendered today, but they may be useful for future group-oriented APIs or
+tooling.
+
+### 4. Transmit Enum Semantics To Another Process
+
+You can emit the description program from one process and reconstruct the same
+enum semantics in another process that does not have the enum type compiled in.
 
 ```cpp
-enum eTest : std::uint8_t {
-  nothing, something,
-  hello = 0, goodbye,
-  group2 = 0x80, mask = 0x7f
+// Sender side: serialize the enum description semantics.
+std::string const program{ ModeDesc.output_program() };
+
+// Receiver side: reconstruct the same description from the transmitted bytes.
+auto decoded = Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<eMode>>()
+  .decode_program(program)
+  .Build();
+
+std::string text{ decoded(eMode::Busy).to_string() };
+// text == "BUSY"
+```
+
+Pass `false` for `throw_on_terminate` when `Terminate` should be treated as a
+legal end-of-program marker instead of a parse error.
+
+### 5. Re-Emit A Program Into A Fixed Buffer
+
+Use `program_size()` first, then write into caller-owned storage with
+`output_program(begin, end, ...)`.
+
+```cpp
+std::size_t const bytes_needed{ ModeDesc.program_size() };
+std::vector<char> buffer(bytes_needed);
+
+char* const end{
+  ModeDesc.output_program(buffer.data(), buffer.data() + buffer.size())
 };
-auto eDisc = build_enum_description<eTest>()
-  .IfNot(eTest::group2, eTest::mask, "group1")
-    .Named(eTest::nothing, "NOTHING")
-    .Named(eTest::something, "Something")
-  .Else("group2")
-    .Named(eTest::hello, "hello")
-    .Named(eTest::goodbye, "goodbye")
-    .Numeric(eTest::mask, "value")
-  .End()
-  .Build();
-auto eValue = eDisc.value(eDisc["goodbye"]);
 
-eValue = set(eDisc["NOTHING"]);                // ok because bit 7 is 0
-eValue = set(eDisc["hello"]);                  // error: not right group
-eValue = set(eDisc["group2"], eDisc["hello"]); // ok because explicitly stating to switch to group2
-
-assert(eValue.is_active(eDisc["group2"]));
-// Can't get a value from a group unless it has no subgroups
-assert(eValue.get_string(eDisc["group2"]) == "hello");
-assert(eValue.get(eDisc["group2"]) == eTest::hello);   // true
-assert(eValue.get(eDisc["group2"]) == eTest::nothing); // this is also true
-
+assert(static_cast<std::size_t>(end - buffer.data()) == bytes_needed);
 ```
 
-Don't actually need an enum:
+### 6. Re-Emit A Program As `std::string` Or To `std::ostream`
+
+These overloads are runtime conveniences layered over the same encode walk.
 
 ```cpp
-auto eDisc = build_enum_description<std::int8_t>()
-  .Named(0, "NOTHING")
-  .Named(1, "Something")
-  .Build();
+std::string const program{ ModeDesc.output_program() };
 
-auto eValue = eDisc.value(); // zero initialised
-auto eText = eValue.to_string();
-auto sDefStream = eDisc.definition_stream();
+ModeDesc.output_program(std::cout) << '\n';
+
+std::string const terminated_program{
+  ModeDesc.output_program(false, true)
+};
+```
+
+Use `append_terminate = true` when the receiver does not already know the
+program length and needs an explicit end marker.
+
+### 7. Reduce Compile-Time Storage With The Macro
+
+If you want the stored enum description itself to be made smaller at compile
+time, define it with `BUILD_ENUM_DESCRIPTION(...)` instead of the explicit
+builder form. The two-pass macro can shrink the backing storage to the used
+size.
+
+```cpp
+constexpr auto ModeDesc = BUILD_ENUM_DESCRIPTION(eMode,
+  .Named(eMode::Idle, "IDLE")
+  .Named(eMode::Busy, "BUSY")
+  .Named(eMode::Error, "ERROR")
+);
+```
+
+## Future Possible Semantics
+
+The ideas in this section are intentionally beyond the currently implemented
+surface.
+
+### 1. Reflect Names Back Into Values
+
+One possible extension would be to let a description map names back into enum
+values.
+
+For grouped descriptions, that probably should not return the bare enum type in
+all cases. The same underlying numeric value can belong to more than one group,
+so a description-aware token or wrapped value is safer than pretending the raw
+enum value is always enough context.
+
+If such a lookup is performed during constant evaluation on a `constexpr`
+description object, the compiler can fold the result down to the numeric value.
+At runtime, the generated code would then see only the resulting number instead
+of performing a string search.
+
+```cpp
+// Not implemented today.
+constexpr auto busy_token{ ModeDesc["BUSY"] };
+```
+
+### 2. Add Group-Aware Safety Helpers
+
+Another possible extension would be helper APIs that make grouped enum values
+safer to manipulate.
+
+When the same numeric sub-value means different things in different groups, a
+plain assignment can be ambiguous. Future helpers could require an explicit
+group switch or reject writes that do not match the active group.
+
+Using the `PacketDesc` example from
+[Let A Flag Change How Other Bits Are Interpreted](#3-let-a-flag-change-how-other-bits-are-interpreted):
+
+```cpp
+// Not implemented today.
+auto value = PacketDesc.value(ePacketState{ 0x01 });
+
+value = PacketDesc.set("HELLO");               // ok if already in the secondary group
+value = PacketDesc.set("primary", "ONE");      // explicit group switch
+value = PacketDesc.force_set("GOODBYE");       // explicit unchecked switch
 ```
 
 ## Enum Stream Specification
@@ -320,7 +416,7 @@ The basic data items are:
 The commands are:
 
 | command          | encoded parameters                                                              | external parameters                                  | meaning                                                                                                                                                                                                                                                                                                                         |
-|------------------|------------------------------------------------------------------ --------------|------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|------------------|---------------------------------------------------------------------------------|------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `Terminate`      | `Unused`                                                                        | none                                                 | Ends stream processing. Required when the stream length is not known externally.                                                                                                                                                                                                                                                |
 | `Named`          | `PairCount` and optional `Has_bitmask`                                          | `pair`, ... or `bitmask`, `pair`, ...                | Uses the effective bitmask for that command, compares the current value against each `enum_value`, and emits the matching `name`.                                                                                                                                                                                               |
 | `Numeric`        | `Format`                                                                        | `bitmask`, `name`                                    | Emits a numeric representation of `value & bitmask` using the selected format.                                                                                                                                                                                                                                                  |
@@ -401,6 +497,8 @@ Here is some pseudo-C++ for one possible rendering policy:
 render(value, stream):
   scope_bitmask = ~0
 
+  // ContinueScope: extends the preceding Named or branch command list inline.
+  // Handle it as part of reading that branch's pairs/commands, not as a top-level command.
   for each command in stream:
     if (command == Terminate)
       break;

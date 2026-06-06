@@ -316,6 +316,8 @@ namespace Constexpr {
       program_cursor_t m_cursor{};
 
     public:
+      using cursor_type = program_cursor_t;
+
       /**
        * @brief Constructs an empty writer.
        */
@@ -465,6 +467,109 @@ namespace Constexpr {
       }
     };
 
+    /**
+     * @brief Non-owning byte sink that counts exact encoded output size.
+     *
+     * This writer mirrors ProgramWriter's surface closely enough for the
+     * encoder to reuse the same walk during constexpr sizing passes.
+     */
+    class CountingProgramWriter {
+      std::size_t m_size{};
+      char m_dummy{};
+
+    public:
+      using cursor_type = std::size_t;
+
+      /**
+       * @brief Constructs an empty counting writer.
+       */
+      constexpr CountingProgramWriter() noexcept = default;
+
+      /**
+       * @brief Returns the current logical byte position.
+       *
+       * @return cursor_type - Current logical byte offset.
+       */
+      constexpr cursor_type program_cursor() const noexcept {
+        return m_size;
+      }
+
+      /**
+       * @brief Returns the total number of bytes that would have been written.
+       *
+       * @return std::size_t - Exact encoded size in bytes.
+       */
+      constexpr std::size_t size() const noexcept {
+        return m_size;
+      }
+
+      /**
+       * @brief Returns a writable dummy byte for opcode patching.
+       *
+       * @param cursor - Previously reserved logical byte offset.
+       * @return char& - Stable dummy byte reference.
+       */
+      constexpr char& byte_at(cursor_type cursor) noexcept {
+        assert(cursor < m_size);
+        (void)cursor;
+        return m_dummy;
+      }
+
+      /**
+       * @brief Returns a const dummy byte for opcode inspection.
+       *
+       * @param cursor - Previously reserved logical byte offset.
+       * @return char const& - Stable dummy byte reference.
+       */
+      constexpr char const& byte_at(cursor_type cursor) const noexcept {
+        assert(cursor < m_size);
+        (void)cursor;
+        return m_dummy;
+      }
+
+      /**
+       * @brief Accounts for one opcode byte.
+       *
+       * @param cmd - Ignored opcode value.
+       */
+      constexpr void write_opcode([[maybe_unused]] eEnumCommand cmd) noexcept {
+        ++m_size;
+      }
+
+      /**
+       * @brief Accounts for one fixed-width integer payload.
+       *
+       * @tparam T - Integral value type.
+       * @param value - Ignored fixed-width value.
+       */
+      template <typename T,
+        typename std::enable_if_t<std::is_integral<T>::value && !std::is_same<T, bool>::value, int> = 0>
+      constexpr void write_int([[maybe_unused]] T value) noexcept {
+        m_size += sizeof(T);
+      }
+
+      /**
+       * @brief Accounts for one condensed dint payload.
+       *
+       * @tparam T - Integral value type.
+       * @param value - Value whose condensed byte length should be counted.
+       */
+      template <typename T,
+        typename std::enable_if_t<std::is_integral<T>::value && !std::is_same<T, bool>::value, int> = 0>
+      constexpr void write_dint(T value) noexcept {
+        m_size += DIntAndSize{ value }.size();
+      }
+
+      /**
+       * @brief Accounts for one NUL-terminated string payload.
+       *
+       * @param value - String to count without its trailing terminator.
+       */
+      constexpr void write_c_string(std::string_view value) noexcept {
+        m_size += value.size() + 1u;
+      }
+    };
+
     // This might not be needed.  Maybe useful for symbolic access to maximum number of distinct
     // items.  The rest...?  Meh.
     enum class eBlockType {
@@ -574,6 +679,22 @@ namespace Constexpr {
     constexpr eEnumStorageType storage_type_base(eEnumStorageType header) noexcept {
       return static_cast<eEnumStorageType>(to_underlying(header) & 0x07u);
     }
+
+    /**
+     * @brief Returns the encoded one-byte storage header for a value type.
+     *
+     * @tparam T - Enum or integral value type.
+     * @param compress - Whether constrained values are dint-condensed.
+     * @return std::uint8_t - Encoded storage-type header byte.
+     */
+    template <typename T>
+    constexpr std::uint8_t storage_header_for_value_type(bool compress = false) noexcept {
+      auto header{ static_cast<std::uint8_t>(storage_type_for_value_type<T>()) };
+      if (compress) {
+        header = static_cast<std::uint8_t>(header | to_underlying(eEnumStorageType::Compress));
+      }
+      return header;
+    }
     
     constexpr inline size_t max_items_for_block(eBlockType block_type) {
       constexpr size_t counts [] { 15, 8, 16, 32 };
@@ -609,16 +730,18 @@ namespace Constexpr {
       }
     };
 
-    template <typename EnumT>
+    template <typename EnumT, typename WriterT = ProgramWriter>
     class EnumEncoder {
       EnumT const* m_enum{};
-      ProgramWriter* m_writer{};
+      WriterT* m_writer{};
       ScopeData<typename EnumT::value_type> m_scope{};
       bool m_compress{};
 
     public:
       using enum_type = EnumT;
       using value_type = typename EnumT::value_type;
+      using writer_type = WriterT;
+      using cursor_type = typename writer_type::cursor_type;
 
       /**
        * @brief Constructs an encoder for one definition-stream emission pass.
@@ -627,7 +750,7 @@ namespace Constexpr {
        * @param writer - Writable stream sink.
        * @param compress - Whether scoped integer values should be condensed as dints.
        */
-      constexpr EnumEncoder(EnumT const& enum_def, ProgramWriter& writer, bool compress = false) noexcept
+      constexpr EnumEncoder(EnumT const& enum_def, WriterT& writer, bool compress = false) noexcept
       : m_enum{ &enum_def }
       , m_writer{ &writer }
       , m_scope{}
@@ -645,7 +768,7 @@ namespace Constexpr {
        */
       constexpr EnumEncoder(
         EnumT const& enum_def,
-        ProgramWriter& writer,
+        WriterT& writer,
         ScopeData<value_type> scope,
         bool compress = false) noexcept
       : m_enum{ &enum_def }
@@ -667,9 +790,9 @@ namespace Constexpr {
       /**
        * @brief Returns the writable stream sink.
        *
-       * @return ProgramWriter& - Referenced output sink.
+       * @return WriterT& - Referenced output sink.
        */
-      constexpr ProgramWriter& writer() const noexcept {
+      constexpr WriterT& writer() const noexcept {
         return *m_writer;
       }
 
@@ -748,19 +871,19 @@ namespace Constexpr {
       /**
        * @brief Returns a pointer to the next byte to be written in the program buffer.
        *
-       * @return program_cursor_t - Current write position in the program buffer.
+       * @return cursor_type - Current write position token.
        */
-      constexpr program_cursor_t program_cursor() const noexcept {
+      constexpr cursor_type program_cursor() const noexcept {
         return m_writer->program_cursor();
       }
 
       /**
        * @brief Returns a pointer to the next byte to be written in the program buffer.
        *
-       * @return program_cursor_t - Current write position in the program buffer.
+       * @return cursor_type - Reserved byte position token.
        */
-      constexpr program_cursor_t reserve_byte() noexcept {
-        auto cursor = m_writer->program_cursor();
+      constexpr cursor_type reserve_byte() noexcept {
+        auto cursor{ m_writer->program_cursor() };
         encode_int(eEnumCommand::Terminate);
         return cursor;
       }
@@ -768,20 +891,20 @@ namespace Constexpr {
       /**
        * @brief Returns a writable reference to a previously written byte.
        *
-       * @param cursor - Pointer to the byte to patch.
+       * @param cursor - Writer-specific token naming the byte to patch.
        * @return char& - Writable byte reference.
        */
-      constexpr char& byte_at(program_cursor_t cursor) {
+      constexpr char& byte_at(cursor_type cursor) {
         return m_writer->byte_at(cursor);
       }
 
       /**
        * @brief Returns a const reference to a previously written byte.
        *
-       * @param cursor - Pointer to the byte to inspect.
+       * @param cursor - Writer-specific token naming the byte to inspect.
        * @return char const& - Const byte reference.
        */
-      constexpr char const& byte_at(program_cursor_t cursor) const {
+      constexpr char const& byte_at(cursor_type cursor) const {
         return m_writer->byte_at(cursor);
       }
 
@@ -789,11 +912,11 @@ namespace Constexpr {
        * @brief Bitwise-ORs selected bits into a previously written byte.
        *
        * @tparam T - Integral or enum byte-sized source of bits.
-       * @param cursor - Pointer to the byte to update.
+       * @param cursor - Writer-specific token naming the byte to update.
        * @param bits - Bits to OR into the byte.
        */
       template <typename T>
-      constexpr void or_byte_at(program_cursor_t cursor, T bits) {
+      constexpr void or_byte_at(cursor_type cursor, T bits) {
         auto const updated_byte {
           static_cast<unsigned char>(byte_at(cursor)) | static_cast<unsigned char>(bits)
         };
@@ -888,9 +1011,9 @@ namespace Constexpr {
      * copied encoder.
      * @return size_t - Number of elements stored in first block.
      */
-    template <typename EnumT, typename FnEncodeBlock>
+    template <typename EnumT, typename WriterT, typename FnEncodeBlock>
     constexpr size_t encode_block(
-      EnumEncoder<EnumT>& ec, eBlockType block_type, FnEncodeBlock fn_encode_block)
+      EnumEncoder<EnumT, WriterT>& ec, eBlockType block_type, FnEncodeBlock fn_encode_block)
     {
       auto new_ec { ec };
       size_t const max_items { max_items_for_block(block_type) };
@@ -919,8 +1042,8 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr void encode(EnumEncoder<EnumT, WriterT>& ec) const {
         if (ec.remaining_items_allowed_in_block() > 0) {
           ec.remaining_items_allowed_in_block() -= 1;
           ec.encode_int(value, ec.scope_bitmask());
@@ -929,7 +1052,7 @@ namespace Constexpr {
             ec.template item<Pairs<E>>(next_pairs_id).encode(ec);
           }
         } else {
-          program_cursor_t pc { ec.reserve_byte() };
+          auto const pc{ ec.reserve_byte() };
           size_t stored {
             encode_block(ec, eBlockType::ContPair,
               [&](auto& new_ec) { encode(new_ec); }) };
@@ -956,11 +1079,11 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr void encode(EnumEncoder<EnumT, WriterT>& ec) const {
         assert(pairs_id || !"Can't define a Named block with no pairs.");
 
-        program_cursor_t pc { ec.reserve_byte() };
+        auto const pc{ ec.reserve_byte() };
         auto new_ec { ec };
         size_t stored { encode_body(new_ec) };
 
@@ -983,8 +1106,8 @@ namespace Constexpr {
        * @param block_type - Pair-block shape used for the first emitted chunk.
        * @return size_t - Number of items stored in first block.
        */
-      template <typename EnumT>
-      constexpr size_t encode_body(EnumEncoder<EnumT>& ec, eBlockType block_type = eBlockType::Pair) const {
+      template <typename EnumT, typename WriterT>
+      constexpr size_t encode_body(EnumEncoder<EnumT, WriterT>& ec, eBlockType block_type = eBlockType::Pair) const {
         assert(pairs_id || !"Can't define a Named block with no pairs.");
 
         if (has_mask) {
@@ -1011,8 +1134,8 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr void encode(EnumEncoder<EnumT, WriterT>& ec) const {
         ec.encode_int(eEnumCommand::Numeric | format);
         ec.verify_scope_bitmask(mask);
         ec.encode_int(mask, ec.scope_bitmask());
@@ -1025,8 +1148,8 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr eEnumCommand encode_inline_body(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr eEnumCommand encode_inline_body(EnumEncoder<EnumT, WriterT>& ec) const {
         assert(mask == ec.scope_bitmask() || !"Inline numeric branch must use the conditional scope bitmask.");
         ec.encode_string(name_id);
         return format;
@@ -1079,8 +1202,8 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr void encode(EnumEncoder<EnumT, WriterT>& ec) const {
         assert(true_group_id || false_group_id || !"Invalid Conditional!");
 
         auto const& enum_def{ ec.enum_def() };
@@ -1140,7 +1263,7 @@ namespace Constexpr {
         
 
         // EMITTING IF AND MASKS
-        program_cursor_t const if_pc { ec.reserve_byte() };
+        auto const if_pc{ ec.reserve_byte() };
         ec.encode_int(group_bitmask, ec.scope_bitmask());
         ec.encode_int(bitmask, ec.scope_bitmask());
         if (if_group && if_group->name_id) {
@@ -1178,7 +1301,7 @@ namespace Constexpr {
         }
 
         auto else_opcode{ eEnumCommand::Else };
-        program_cursor_t const else_pc { ec.reserve_byte() };
+        auto const else_pc{ ec.reserve_byte() };
 
         if (else_group->name_id) {
           ec.encode_string(else_group->name_id);
@@ -1219,8 +1342,8 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr void encode_current(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr void encode_current(EnumEncoder<EnumT, WriterT>& ec) const {
         // TODO: Make this into ec.template item_if call
         auto const dispatch_current = overload{
           [&ec](Named<E> const&       cmd) { cmd.encode(ec); },
@@ -1238,15 +1361,15 @@ namespace Constexpr {
        * @tparam EnumT - Referenced enum representation type.
        * @param ec - Active encoder for the current scope.
        */
-      template <typename EnumT>
-      constexpr void encode(EnumEncoder<EnumT>& ec) const {
+      template <typename EnumT, typename WriterT>
+      constexpr void encode(EnumEncoder<EnumT, WriterT>& ec) const {
         if (ec.remaining_items_allowed_in_block() < 0) {
           encode_current(ec);
         } else if (ec.remaining_items_allowed_in_block() > 0) {
           ec.remaining_items_allowed_in_block() -= 1;
           encode_current(ec);
         } else {
-          program_cursor_t pc { ec.reserve_byte() };
+          auto const pc{ ec.reserve_byte() };
           size_t stored {
             encode_block(ec, eBlockType::ContCmd, [&](auto& new_ec) { encode(new_ec); }) };
           ec.or_byte_at(pc, eEnumCommand::ContinueScope);
@@ -2435,6 +2558,34 @@ namespace Constexpr {
     Strings<Settings::MAX_STRING_STORAGE> strings{};
     Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
 
+    /**
+     * @brief Emits the full headered program through one writer surface.
+     *
+     * @tparam WriterT - Writer type compatible with impl::EnumEncoder.
+     * @param writer - Destination writer or counting sink.
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return WriterT& - The updated writer.
+     */
+    template <typename WriterT>
+    constexpr WriterT& output_program_impl(
+      WriterT& writer,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      writer.write_int(impl::storage_header_for_value_type<typename Settings::Value>(compress));
+
+      impl::EnumEncoder<Enum<Settings>, WriterT> encoder{ *this, writer, compress };
+      if (cmds_id()) {
+        item<impl::Cmds<typename Settings::Value>>(cmds_id()).encode(encoder);
+      }
+      if (append_terminate) {
+        writer.write_opcode(eEnumCommand::Terminate);
+      }
+
+      return writer;
+    }
+
   public:
     using value_type = typename Settings::Value;
     using item_variant = Variant;
@@ -2445,6 +2596,78 @@ namespace Constexpr {
 
     constexpr std::uint32_t actual_space() const {
       return Constexpr::reserve_space(Settings::MAX_STRING_STORAGE, Settings::MAX_ITEMS_STORAGE);
+    }
+
+    /**
+     * @brief Returns the exact encoded program size including the storage header.
+     *
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return std::size_t - Exact number of bytes required for output_program().
+     */
+    constexpr std::size_t program_size(
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      impl::CountingProgramWriter writer{};
+      return output_program_impl(writer, compress, append_terminate).size();
+    }
+
+    /**
+     * @brief Encodes the full headered program into one caller-supplied buffer.
+     *
+     * @param begin - First writable byte in the destination buffer.
+     * @param end - One-past-the-end of the destination buffer.
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return char* - Pointer one past the last byte written.
+     */
+    constexpr char* output_program(
+      char* begin,
+      char* end,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      assert(begin <= end);
+      assert(static_cast<std::size_t>(end - begin) >= program_size(compress, append_terminate)
+        || !"Not enough space to store enum program.");
+
+      impl::ProgramWriter writer{ begin, end };
+      return output_program_impl(writer, compress, append_terminate).program_cursor();
+    }
+
+    /**
+     * @brief Encodes the full headered program into one runtime-owned string.
+     *
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return std::string - Runtime-owned encoded program bytes.
+     */
+    std::string output_program(
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      std::string program(program_size(compress, append_terminate), '\0');
+      output_program(program.data(), program.data() + program.size(), compress, append_terminate);
+      return program;
+    }
+
+    /**
+     * @brief Encodes the full headered program into one output stream.
+     *
+     * @param os - Destination output stream.
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return std::ostream& - The same destination output stream.
+     */
+    std::ostream& output_program(
+      std::ostream& os,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      std::string const program{ output_program(compress, append_terminate) };
+      os.write(program.data(), static_cast<std::streamsize>(program.size()));
+      return os;
     }
 
     /**

@@ -4,7 +4,6 @@
 
 #include <cstdint>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -103,6 +102,27 @@ constexpr bool build_enum_macro_materializes_constexpr_enum{
 };
 static_assert(build_enum_macro_materializes_constexpr_enum);
 
+// Prove that the two-pass macro can also replay a multi-step conditional builder chain during constant evaluation.
+constexpr bool build_enum_macro_materializes_conditional_constexpr_enum{
+  [] {
+    constexpr auto enum_def{
+      BUILD_ENUM_DESCRIPTION(TestEnum,
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+          .Named(TestEnum{ 0x01u }, "if-one")
+        .Else()
+          .Named(TestEnum{ 0x02u }, "else-two")
+        .End())
+    };
+
+    auto const& root_cmds{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+    auto const& conditional{ enum_def.item<TestConditional>(root_cmds.command_id) };
+    return enum_def.cmds_id() != 0u
+      && conditional.true_group_id != 0u
+      && conditional.false_group_id != 0u;
+  }()
+};
+static_assert(build_enum_macro_materializes_conditional_constexpr_enum);
+
 // Prove that a valid stream can decode directly into a constexpr enum during constant evaluation.
 constexpr bool decode_program_materializes_constexpr_enum{
   [] {
@@ -133,6 +153,27 @@ constexpr bool build_enum_macro_decodes_constexpr_program{
   }()
 };
 static_assert(build_enum_macro_decodes_constexpr_program);
+
+// Prove that the public Enum output API can size and encode one full stream during constant evaluation.
+constexpr bool enum_output_program_materializes_constexpr_stream{
+  [] {
+    constexpr auto enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .Named(TestEnum{ 0x01u }, "one")
+        .Named(TestEnum{ 0x02u }, "two")
+        .Build()
+    };
+
+    constexpr std::size_t program_size{ enum_def.program_size() };
+    static_assert(program_size == sizeof(kDecodeProgram));
+
+    char program[program_size]{};
+    char* const end{ enum_def.output_program(program, program + program_size) };
+    return end == program + program_size
+      && std::string_view{ program, program_size } == kDecodeProgramSv;
+  }()
+};
+static_assert(enum_output_program_materializes_constexpr_stream);
 
 // Fixture-building helpers create stored group shapes that the runtime tests
 // can classify without manually assembling ids inline in each case.
@@ -180,20 +221,7 @@ std::string encode_program_with_header(
   bool compress = false,
   bool append_terminate = false)
 {
-  Constexpr::string<2048> program{};
-  Constexpr::impl::ProgramWriter writer{ program };
-  writer.write_int(storage_header_for<typename EnumT::value_type>(compress));
-
-  Constexpr::impl::EnumEncoder<EnumT> encoder{ enum_def, writer, compress };
-  if (enum_def.cmds_id()) {
-    enum_def.template item<Constexpr::impl::Cmds<typename EnumT::value_type>>(enum_def.cmds_id()).encode(encoder);
-  }
-  if (append_terminate) {
-    writer.write_opcode(eEnumCommand::Terminate);
-  }
-
-  writer.finish(program);
-  return std::string{ program.data(), program.size() };
+  return enum_def.output_program(compress, append_terminate);
 }
 
 /**
@@ -503,6 +531,32 @@ TEST(EnumSpecWriter, AllowsPatchThroughCursorByteReference)
     static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Named) | 0x03u));
 }
 
+TEST(EnumSpecEncoding, PublicOutputProgramOverloadsEmitConsistentHeaderedStreams)
+{
+  // The public Enum output API should size, buffer, string, and ostream-emit the same complete program stream.
+  TestEnumDef const enum_def{ decode_program(kDecodeProgramSv) };
+  std::string const expected{ kDecodeProgramSv };
+
+  EXPECT_EQ(enum_def.program_size(), expected.size());
+  EXPECT_EQ(enum_def.output_program(), expected);
+
+  std::string expected_with_terminate{ expected };
+  expected_with_terminate.push_back(static_cast<char>(eEnumCommand::Terminate));
+  EXPECT_EQ(enum_def.program_size(false, true), expected_with_terminate.size());
+  EXPECT_EQ(enum_def.output_program(false, true), expected_with_terminate);
+
+  char buffer[32]{};
+  char* const end{ enum_def.output_program(buffer, buffer + sizeof(buffer)) };
+  std::string_view const buffered_program{ buffer, static_cast<std::size_t>(end - buffer) };
+  std::string_view const expected_program{ expected };
+  EXPECT_EQ(static_cast<std::size_t>(end - buffer), expected.size());
+  EXPECT_EQ(buffered_program, expected_program);
+
+  std::ostringstream stream{};
+  EXPECT_EQ(&enum_def.output_program(stream), &stream);
+  EXPECT_EQ(stream.str(), expected);
+}
+
 TEST(EnumSpecEncoding, CopiesChildScopeWithoutMutatingParentState)
 {
   // A named child scope may narrow its mask and reset its block allowance without affecting the caller.
@@ -779,7 +833,7 @@ TEST(EnumSpecBuilder, BuildsRootNamedListAndStoresCmdsId)
 
 TEST(EnumSpecBuilder, BuildsConditionalBranchesThroughTypedScopes)
 {
-  // IfNot() should store the first user-authored branch as false, then Else() should add the true branch and return to root on End().
+  // IfNot() should store the first user-authored branch as false, then Else() should add the true branch and render the correct branch for bit-clear vs bit-set values.
   TestEnumDef const enum_def{
     Constexpr::build_enum_description<TestSettings>()
       .IfNot(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
@@ -814,6 +868,47 @@ TEST(EnumSpecBuilder, BuildsConditionalBranchesThroughTypedScopes)
   auto const& else_numeric{ enum_def.item<TestNumeric>(else_cmds.command_id) };
   EXPECT_EQ(else_numeric.mask, 0x0Fu);
   EXPECT_EQ(enum_def.get_string(else_numeric.name_id), "bits");
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x01u }), "one");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x80u }), "bits=0");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x81u }), "bits=1");
+}
+
+TEST(EnumSpecBuilder, BuildsNestedConditionalBranchesThroughBothBranchScopes)
+{
+  // Nested If() calls inside both an if branch and an else branch should build correctly and render through recursive conditional traversal.
+  TestEnumDef const enum_def{
+    Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .If(TestEnum{ 0x08u }, TestEnum{ 0x03u })
+          .Named(TestEnum{ 0x01u }, "if-inner-one")
+        .Else()
+          .Named(TestEnum{ 0x02u }, "if-inner-two")
+        .End()
+      .Else()
+        .If(TestEnum{ 0x04u }, TestEnum{ 0x03u })
+          .Named(TestEnum{ 0x01u }, "else-inner-one")
+        .Else()
+          .Named(TestEnum{ 0x02u }, "else-inner-two")
+        .End()
+      .End()
+      .Build()
+  };
+
+  auto const& root_cmds{ enum_def.item<TestCmds>(enum_def.cmds_id()) };
+  auto const& outer{ enum_def.item<TestConditional>(root_cmds.command_id) };
+  auto const& if_group{ enum_def.item<TestGroup>(outer.true_group_id) };
+  auto const& else_group{ enum_def.item<TestGroup>(outer.false_group_id) };
+
+  auto const& if_cmds{ enum_def.item<TestCmds>(if_group.cmds_id) };
+  auto const& else_cmds{ enum_def.item<TestCmds>(else_group.cmds_id) };
+  EXPECT_NE(enum_def.item_if<TestConditional>(if_cmds.command_id), nullptr);
+  EXPECT_NE(enum_def.item_if<TestConditional>(else_cmds.command_id), nullptr);
+
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x89u }), "if-inner-one");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x82u }), "if-inner-two");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x05u }), "else-inner-one");
+  EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x02u }), "else-inner-two");
 }
 
 TEST(EnumSpecBuilder, CanonicalizesEmptyConditionalBranches)
@@ -1039,7 +1134,7 @@ TEST(EnumSpecDecode, DecodesGroupIfNumericBranchesAndCommandElse)
 
 TEST(EnumSpecDecode, DecodesPairContinueScopeExtensions)
 {
-  // A Named branch that overflowed its first pair block should decode back into one linked pair chain.
+  // A Named branch that overflowed its first pair block should decode back into one linked pair chain and still match the rebuilt pairs when rendered.
   TestEnumDef const source{
     [] {
       TestEnumDef enum_def{};
@@ -1054,6 +1149,8 @@ TEST(EnumSpecDecode, DecodesPairContinueScopeExtensions)
   auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
   auto const& named{ decoded.item<TestNamed>(root.command_id) };
   EXPECT_EQ(count_pairs(decoded, named.pairs_id), 17u);
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x01u }), "a");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x11u }), "q");
 }
 
 TEST(EnumSpecDecode, DecodesCommandContinueScopeExtensions)
@@ -1194,6 +1291,44 @@ TEST(EnumSpecDecode, RoundTripsStoredFalseOnlyConditionalBranches)
   EXPECT_EQ(render_enum(decoded, TestEnum{ 0x01u }), "one");
 }
 
+TEST(EnumSpecDecode, RoundTripsNestedConditionalBranches)
+{
+  // Nested conditionals stored inside both parent branches should survive encode/decode and still render through recursive command traversal.
+  TestEnumDef const source{
+    Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .If(TestEnum{ 0x08u }, TestEnum{ 0x03u })
+          .Named(TestEnum{ 0x01u }, "if-inner-one")
+        .Else()
+          .Named(TestEnum{ 0x02u }, "if-inner-two")
+        .End()
+      .Else()
+        .If(TestEnum{ 0x04u }, TestEnum{ 0x03u })
+          .Named(TestEnum{ 0x01u }, "else-inner-one")
+        .Else()
+          .Named(TestEnum{ 0x02u }, "else-inner-two")
+        .End()
+      .End()
+      .Build()
+  };
+
+  TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+  auto const& root{ decoded.item<TestCmds>(decoded.cmds_id()) };
+  auto const& outer{ decoded.item<TestConditional>(root.command_id) };
+
+  auto const& if_group{ decoded.item<TestGroup>(outer.true_group_id) };
+  auto const& else_group{ decoded.item<TestGroup>(outer.false_group_id) };
+  auto const& if_cmds{ decoded.item<TestCmds>(if_group.cmds_id) };
+  auto const& else_cmds{ decoded.item<TestCmds>(else_group.cmds_id) };
+  EXPECT_NE(decoded.item_if<TestConditional>(if_cmds.command_id), nullptr);
+  EXPECT_NE(decoded.item_if<TestConditional>(else_cmds.command_id), nullptr);
+
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x89u }), "if-inner-one");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x82u }), "if-inner-two");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x05u }), "else-inner-one");
+  EXPECT_EQ(render_enum(decoded, TestEnum{ 0x02u }), "else-inner-two");
+}
+
 TEST(EnumSpecDecode, OwnsCopiedStringsAndRoundTripsRenderedBehavior)
 {
   // The decoder should copy incoming strings into the enum heap and preserve rendered behavior after a headered round-trip.
@@ -1238,6 +1373,35 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   };
   EXPECT_THROW((void)decode_program(invalid_numeric_opcode), Constexpr::EnumParseInvalidOpcode);
 
+  std::string const zero_group_bitmask{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::GroupIf);
+      writer.write_int(static_cast<std::uint8_t>(0x00u));
+    })
+  };
+  EXPECT_THROW((void)decode_program(zero_group_bitmask), Constexpr::EnumParseInvalidStructure);
+
+  std::string const multi_bit_group_bitmask{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::GroupIf);
+      writer.write_int(static_cast<std::uint8_t>(0x03u));
+    })
+  };
+  EXPECT_THROW((void)decode_program(multi_bit_group_bitmask), Constexpr::EnumParseInvalidStructure);
+
+  std::string const pair_value_outside_named_mask{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Named) |
+        static_cast<unsigned char>(eEnumCommand::fHasBitmask) |
+        0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x03u));
+      writer.write_int(static_cast<std::uint8_t>(0x04u));
+      writer.write_c_string("bad");
+    })
+  };
+  EXPECT_THROW((void)decode_program(pair_value_outside_named_mask), Constexpr::EnumParseInvalidStructure);
+
   std::string const misplaced_else{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
@@ -1266,6 +1430,38 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
     })
   };
   EXPECT_THROW((void)decode_program(bytes_after_terminate, false), Constexpr::EnumParseInvalidStructure);
+
+  std::string const else_command_branch_with_only_noop_conditional{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::GroupIf) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu));
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Named) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x01u));
+      writer.write_c_string("one");
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Else) |
+        static_cast<unsigned char>(eEnumCommand::fElseCmds)));
+      writer.write_opcode(eEnumCommand::GroupIf);
+      writer.write_int(static_cast<std::uint8_t>(0x08u));
+      writer.write_int(static_cast<std::uint8_t>(0x03u));
+    })
+  };
+  EXPECT_THROW((void)decode_program(else_command_branch_with_only_noop_conditional), Constexpr::EnumParseInvalidStructure);
+
+  std::string const invalid_compressed_scoped_value{
+    build_manual_program(storage_header_for<TestEnum>(true), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::GroupIfNamed) | 0x01u));
+      writer.write_dint(static_cast<std::uint8_t>(0x80u));
+      writer.write_dint(static_cast<std::uint8_t>(0x0Au));
+      writer.write_dint(static_cast<std::uint8_t>(0x04u));
+      writer.write_c_string("bad");
+    })
+  };
+  EXPECT_THROW((void)decode_program(invalid_compressed_scoped_value), Constexpr::EnumParseInvalidStructure);
 
   std::string const duplicate_masked_values{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
