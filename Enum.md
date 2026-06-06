@@ -229,7 +229,7 @@ enum class eMode : std::uint8_t {
 };
 
 constexpr auto ModeDesc = Constexpr::build_enum_description<
-  Constexpr::DefaultEnumSettings<eMode>
+  Constexpr::EnumSettings<eMode>
 >()
   .Named(eMode::Idle, "IDLE")
   .Named(eMode::Busy, "BUSY")
@@ -267,7 +267,7 @@ enum class ePacketState : std::uint8_t {
   mKindMask = 0x0F,
 };
 
-auto PacketDesc = Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<ePacketState>>()
+auto PacketDesc = Constexpr::build_enum_description<Constexpr::EnumSettings<ePacketState>>()
   .If(ePacketState::fPrimary, ePacketState::mKindMask, "primary")
     .Named(ePacketState{ 0x01 }, "ONE")
     .Named(ePacketState{ 0x02 }, "TWO")
@@ -306,7 +306,7 @@ enum semantics in another process that does not have the enum type compiled in.
 std::string const program{ ModeDesc.output_program() };
 
 // Receiver side: reconstruct the same description from the transmitted bytes.
-auto decoded = Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<eMode>>()
+auto decoded = Constexpr::build_enum_description<Constexpr::EnumSettings<eMode>>()
   .decode_program(program)
   .Build();
 

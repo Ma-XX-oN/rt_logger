@@ -296,21 +296,6 @@ namespace Constexpr {
       return static_cast<std::uint16_t>(value >> 16);
     }
 
-    /**
-     * @brief Collect immutable enum-representation settings in one place.
-     *
-     * @tparam E - Enum or integer value type stored by the representation.
-     * @tparam StringAndItemStorage - Packed storage reservation with string
-     *   space in the low 16 bits and item space in the high 16 bits.
-     * @tparam Variant - Variant type used to store every graph item.
-     */
-    template <typename E, std::uint32_t StringAndItemStorage, typename Variant>
-    struct EnumSettings {
-      using Value = E;
-      constexpr static size_t MAX_STRING_STORAGE { string_space(StringAndItemStorage) };
-      constexpr static size_t MAX_ITEMS_STORAGE  {   item_space(StringAndItemStorage) };
-      using ItemVariant = Variant;
-    };
 
     using program_cursor_t = char*;
 
@@ -999,9 +984,9 @@ namespace Constexpr {
        * @brief Retrieves an unresolved stored item variant by id.
        *
        * @param item_id - Item id to look up.
-       * @return typename EnumT::item_variant const& - Stored item variant.
+       * @return typename EnumT::command_t const& - Stored item variant.
        */
-      constexpr typename EnumT::item_variant const& item(item_id_t item_id) const {
+      constexpr typename EnumT::command_t const& item(item_id_t item_id) const {
         return m_enum->item(item_id);
       }
 
@@ -2583,11 +2568,17 @@ namespace Constexpr {
    */
   template <typename Settings>
   class Enum {
-    using Variant = typename Settings::ItemVariant;
-
+  public:
+    using value_type = typename Settings::value_type;
+    using command_t = std::variant<
+      impl::Pairs<value_type>, impl::Named<value_type>, impl::Numeric<value_type>,
+      impl::Cmds<value_type>, impl::Group<value_type>, impl::Conditional<value_type>
+    >;
+    
+  private:
     item_id_t m_cmds_id{};
     Strings<Settings::MAX_STRING_STORAGE> strings{};
-    Items<Settings::MAX_ITEMS_STORAGE, Variant> items{};
+    Items<Settings::MAX_ITEMS_STORAGE, command_t> items{};
 
     /**
      * @brief Emits the full headered program through one writer surface.
@@ -2604,11 +2595,11 @@ namespace Constexpr {
       bool compress = false,
       bool append_terminate = false) const
     {
-      writer.write_int(impl::storage_header_for_value_type<typename Settings::Value>(compress));
+      writer.write_int(impl::storage_header_for_value_type<typename Settings::value_type>(compress));
 
       impl::EnumEncoder<Enum<Settings>, WriterT> encoder{ *this, writer, compress };
       if (cmds_id()) {
-        item<impl::Cmds<typename Settings::Value>>(cmds_id()).encode(encoder);
+        item<impl::Cmds<typename Settings::value_type>>(cmds_id()).encode(encoder);
       }
       if (append_terminate) {
         writer.write_opcode(eEnumCommand::Terminate);
@@ -2618,9 +2609,6 @@ namespace Constexpr {
     }
 
   public:
-    using value_type = typename Settings::Value;
-    using item_variant = Variant;
-
     constexpr std::uint32_t reserve_space() const {
       return Constexpr::reserve_space(strings.used_space(), items.used_space());
     }
@@ -2759,9 +2747,9 @@ namespace Constexpr {
      * @brief Retrieves a stored item variant by id.
      *
      * @param item_id - Item id.
-     * @return Variant& - Reference to the stored item variant.
+     * @return command_t& - Reference to the stored item variant.
      */
-    constexpr Variant& item(item_id_t item_id) {
+    constexpr command_t& item(item_id_t item_id) {
       return items.get_item(item_id);
     }
 
@@ -2769,9 +2757,9 @@ namespace Constexpr {
      * @brief Retrieves a stored item variant by id as const.
      *
      * @param item_id - Item id.
-     * @return Variant const& - Reference to the stored item variant.
+     * @return command_t const& - Reference to the stored item variant.
      */
-    constexpr Variant const& item(item_id_t item_id) const {
+    constexpr command_t const& item(item_id_t item_id) const {
       return items.get_item(item_id);
     }
 
@@ -2804,7 +2792,7 @@ namespace Constexpr {
      *   correct type, otherwise return nullptr.
      *
      * @param item_id - Item id.
-     * @return Variant const* - Pointer to the stored item variant or nullptr
+     * @return command_t const* - Pointer to the stored item variant or nullptr
      *   if not that type.
      */
     template <typename Item>
@@ -2817,7 +2805,7 @@ namespace Constexpr {
      *   correct type, otherwise return nullptr.
      *
      * @param item_id - Item id.
-     * @return Variant const* - Pointer to the stored item variant or nullptr
+     * @return command_t const* - Pointer to the stored item variant or nullptr
      *   if not that type.
      */
     template <typename Item>
@@ -2923,7 +2911,7 @@ namespace Constexpr {
     template <typename Settings>
     class EnumDecoder {
       using enum_type = Enum<Settings>;
-      using value_type = typename Settings::Value;
+      using value_type = typename Settings::value_type;
       using underlying_value_type = underlying_equivalent_t<value_type>;
       using unsigned_value_type = unsigned_equivalent_t<value_type>;
 
@@ -3711,7 +3699,7 @@ namespace Constexpr {
   template <typename Settings>
   class EnumBuilder : public impl::CommandScopeFacade<EnumBuilder<Settings>> {
     Enum<Settings> m_enum{};
-    impl::CommandScopeState<typename Settings::Value> m_state{};
+    impl::CommandScopeState<typename Settings::value_type> m_state{};
 
     friend class impl::CommandScopeFacade<EnumBuilder<Settings>>;
     template <typename Parent>
@@ -3731,9 +3719,9 @@ namespace Constexpr {
     /**
      * @brief Returns mutable access to the root command-scope state.
      *
-     * @return impl::CommandScopeState<typename Settings::Value>& - Mutable root state.
+     * @return impl::CommandScopeState<typename Settings::value_type>& - Mutable root state.
      */
-    constexpr impl::CommandScopeState<typename Settings::Value>& command_state() noexcept {
+    constexpr impl::CommandScopeState<typename Settings::value_type>& command_state() noexcept {
       return m_state;
     }
 
@@ -3756,8 +3744,8 @@ namespace Constexpr {
      */
     constexpr void append_named_pair_impl(
       bool has_mask,
-      typename Settings::Value bitmask,
-      typename Settings::Value value,
+      typename Settings::value_type bitmask,
+      typename Settings::value_type value,
       std::string_view name)
     {
       impl::CommandScopeFacade<EnumBuilder<Settings>>::append_named_pair(
@@ -3772,7 +3760,7 @@ namespace Constexpr {
      * @param format - Numeric formatting flags.
      */
     constexpr void append_numeric_impl(
-      typename Settings::Value bitmask,
+      typename Settings::value_type bitmask,
       std::string_view name,
       eEnumCommand format)
     {
@@ -3791,8 +3779,8 @@ namespace Constexpr {
      */
     constexpr auto begin_if_impl(
       bool negate_first,
-      typename Settings::Value group_bitmask,
-      typename Settings::Value scope_bitmask,
+      typename Settings::value_type group_bitmask,
+      typename Settings::value_type scope_bitmask,
       std::string_view group_name,
       bool has_group_name)
     {
@@ -3812,7 +3800,7 @@ namespace Constexpr {
   public:
     using settings_type = Settings;
     using enum_type = Enum<Settings>;
-    using value_type = typename Settings::Value;
+    using value_type = typename Settings::value_type;
 
     /**
      * @brief Construct an empty enum builder.
@@ -3875,12 +3863,20 @@ namespace Constexpr {
    */
   constexpr std::uint32_t DefaultReserved{ reserve_space(256, 256) };
 
-  template <typename E, std::uint32_t StringAndItemCapacity = DefaultReserved>
-  using DefaultEnumSettings = impl::EnumSettings<E, StringAndItemCapacity
-  , std::variant<
-      impl::Pairs<E>, impl::Named<E>, impl::Numeric<E>, impl::Cmds<E>, impl::Group<E>, impl::Conditional<E>
-    >
-  >;
+  /**
+   * @brief Immutable enum-representation settings bundling value type and
+   *   fixed storage capacities.
+   *
+   * @tparam ValueT - Enum or integer value type stored by the representation.
+   * @tparam StringAndItemCapacity - Packed storage reservation with string
+   *   space in the low 16 bits and item space in the high 16 bits.
+   */
+  template <typename ValueT, std::uint32_t StringAndItemCapacity = DefaultReserved>
+  struct EnumSettings {
+    using value_type = ValueT;
+    constexpr static std::uint16_t MAX_STRING_STORAGE { impl::string_space(StringAndItemCapacity) };
+    constexpr static std::uint16_t MAX_ITEMS_STORAGE  { impl::item_space(StringAndItemCapacity)  };
+  };
 
   /**
    * @brief Variant-backed runtime-selected wrapper around one decoded typed
@@ -3892,14 +3888,14 @@ namespace Constexpr {
   template <std::uint32_t StringAndItemCapacity = DefaultReserved>
   class AnyEnumDescription {
     using variant_type = std::variant<
-      Enum<DefaultEnumSettings<std::int8_t,   StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::int16_t,  StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::int32_t,  StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::int64_t,  StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::uint8_t,  StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::uint16_t, StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::uint32_t, StringAndItemCapacity>>,
-      Enum<DefaultEnumSettings<std::uint64_t, StringAndItemCapacity>>
+      Enum<EnumSettings<std::int8_t,   StringAndItemCapacity>>,
+      Enum<EnumSettings<std::int16_t,  StringAndItemCapacity>>,
+      Enum<EnumSettings<std::int32_t,  StringAndItemCapacity>>,
+      Enum<EnumSettings<std::int64_t,  StringAndItemCapacity>>,
+      Enum<EnumSettings<std::uint8_t,  StringAndItemCapacity>>,
+      Enum<EnumSettings<std::uint16_t, StringAndItemCapacity>>,
+      Enum<EnumSettings<std::uint32_t, StringAndItemCapacity>>,
+      Enum<EnumSettings<std::uint64_t, StringAndItemCapacity>>
     >;
     using value_view_type = AnyEnumValueView<AnyEnumDescription<StringAndItemCapacity>>;
 
@@ -4237,7 +4233,7 @@ namespace Constexpr {
       std::string_view program,
       bool throw_on_terminate)
     {
-      using Settings = DefaultEnumSettings<ValueT, StringAndItemCapacity>;
+      using Settings = EnumSettings<ValueT, StringAndItemCapacity>;
       return any_enum_type{
         impl::storage_type_for_value_type<ValueT>(),
         impl::EnumDecoder<Settings>{ program, throw_on_terminate }.decode()
@@ -4340,13 +4336,13 @@ namespace Constexpr {
  * );
  * ```
  */
-#define BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                          \
-  (Constexpr::build_enum_description<                                                \
-    Constexpr::DefaultEnumSettings<                                                  \
-      enum_type,                                                                     \
-      Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<enum_type>>() \
-        enum_description.reserve_space()                                             \
-    >                                                                                \
+#define BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                   \
+  (Constexpr::build_enum_description<                                         \
+    Constexpr::EnumSettings<                                                  \
+      enum_type,                                                              \
+      Constexpr::build_enum_description<Constexpr::EnumSettings<enum_type>>() \
+        enum_description.reserve_space()                                      \
+    >                                                                         \
   >() enum_description.Build())
 
 

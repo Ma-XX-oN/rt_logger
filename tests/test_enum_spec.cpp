@@ -18,9 +18,8 @@ using TestNumeric = Constexpr::impl::Numeric<TestEnum>;
 using TestConditional = Constexpr::impl::Conditional<TestEnum>;
 using TestGroup = Constexpr::impl::Group<TestEnum>;
 using TestCmds = Constexpr::impl::Cmds<TestEnum>;
-using TestItemVariant = std::variant<TestPairs, TestNamed, TestNumeric, TestConditional, TestGroup, TestCmds>;
-using TestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_space(128, 32), TestItemVariant>;
-using LargeTestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_space(256, 64), TestItemVariant>;
+using TestSettings = Constexpr::EnumSettings<TestEnum, Constexpr::reserve_space(128, 32)>;
+using LargeTestSettings = Constexpr::EnumSettings<TestEnum, Constexpr::reserve_space(256, 64)>;
 using TestEnumDef = Constexpr::Enum<TestSettings>;
 using LargeTestEnumDef = Constexpr::Enum<LargeTestSettings>;
 using AnyTestEnumDef = Constexpr::AnyEnumDescription<Constexpr::reserve_space(128, 32)>;
@@ -70,7 +69,7 @@ static_assert(builder_end_returns_exact_parent);
 constexpr bool builder_build_materializes_constexpr_enum{
   [] {
     constexpr auto enum_def{
-      Constexpr::build_enum_description<Constexpr::DefaultEnumSettings<int>>()
+      Constexpr::build_enum_description<Constexpr::EnumSettings<int>>()
         .Named(TestEnum{ 0x01u }, "one")
         .Named(TestEnum{ 0x02u }, "two")
         .Build()
