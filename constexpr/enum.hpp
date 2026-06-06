@@ -3861,7 +3861,7 @@ namespace Constexpr {
    * @brief Default fixed-capacity storage budget used by enum-description
    * builders and wrappers when the caller does not override it.
    */
-  constexpr std::uint32_t DefaultReserved{ reserve_space(256, 256) };
+  constexpr std::uint32_t DefaultReserved{ reserve_space(256, 128) };
 
   /**
    * @brief Immutable enum-representation settings bundling value type and
