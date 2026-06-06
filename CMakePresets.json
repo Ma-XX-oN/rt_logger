@@ -17,6 +17,22 @@
       "environment": {
         "PATH": "C:/msys64/clang64/bin;$penv{PATH}"
       }
+    },
+    {
+      "name": "clang64-release",
+      "displayName": "CLANG64 Release",
+      "description": "Configure with MSYS2 CLANG64 Clang, Ninja, and GoogleTest in release mode.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-clang-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "C:/msys64/clang64/bin/clang++.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/msys64/clang64/bin/ninja.exe",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "environment": {
+        "PATH": "C:/msys64/clang64/bin;$penv{PATH}"
+      }
     }
   ],
   "buildPresets": [
@@ -24,6 +40,11 @@
       "name": "clang64-debug-ubsan-build",
       "displayName": "Build CLANG64 Debug UBSan",
       "configurePreset": "clang64-debug-ubsan"
+    },
+    {
+      "name": "clang64-release-build",
+      "displayName": "Build CLANG64 Release",
+      "configurePreset": "clang64-release"
     }
   ],
   "testPresets": [
@@ -31,6 +52,17 @@
       "name": "clang64-debug-ubsan-test",
       "displayName": "Test CLANG64 Debug UBSan",
       "configurePreset": "clang64-debug-ubsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "PATH": "C:/msys64/clang64/bin;$penv{PATH}"
+      }
+    },
+    {
+      "name": "clang64-release-test",
+      "displayName": "Test CLANG64 Release",
+      "configurePreset": "clang64-release",
       "output": {
         "outputOnFailure": true
       },
