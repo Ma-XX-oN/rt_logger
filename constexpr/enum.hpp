@@ -24,6 +24,7 @@
 #include <variant>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include "masked_bits.hpp"
 #include "bitwise_enum.hpp"
@@ -678,6 +679,30 @@ namespace Constexpr {
      */
     constexpr eEnumStorageType storage_type_base(eEnumStorageType header) noexcept {
       return static_cast<eEnumStorageType>(to_underlying(header) & 0x07u);
+    }
+
+    /**
+     * @brief Reads and validates the one-byte storage-type header prefix of one
+     * enum definition stream.
+     *
+     * @param program - Definition stream including the header byte.
+     * @return eEnumStorageType - Decoded storage-type header including the
+     *   optional Compress bit.
+     *
+     * @throws EnumParseEmptyInput when \p program is empty.
+     * @throws EnumParseHeaderMismatch when the header uses unsupported bits.
+     */
+    constexpr eEnumStorageType read_storage_header(std::string_view program) {
+      if (program.empty()) {
+        throw EnumParseEmptyInput("Enum program must contain at least the storage-type header byte.");
+      }
+
+      std::uint8_t const raw_header{ static_cast<std::uint8_t>(program.front()) };
+      if ((raw_header & static_cast<std::uint8_t>(~0x0fu)) != 0u) {
+        throw EnumParseHeaderMismatch("Enum program header uses unsupported storage-type bits.");
+      }
+
+      return static_cast<eEnumStorageType>(raw_header);
     }
 
     /**
@@ -3267,20 +3292,12 @@ namespace Constexpr {
        *   not match the requested destination enum value type.
        */
       constexpr void read_header() {
-        if (m_program.empty()) {
-          throw EnumParseEmptyInput("Enum program must contain at least the storage-type header byte.");
-        }
-
-        std::uint8_t const raw_header{ read_byte() };
-        if ((raw_header & static_cast<std::uint8_t>(~0x0fu)) != 0u) {
-          throw EnumParseHeaderMismatch("Enum program header uses unsupported storage-type bits.");
-        }
-
-        auto const header{ static_cast<eEnumStorageType>(raw_header) };
+        auto const header{ impl::read_storage_header(m_program) };
         if (storage_type_base(header) != storage_type_for_value_type<value_type>()) {
           throw EnumParseHeaderMismatch("Enum program header does not match the requested enum value type.");
         }
 
+        (void)read_byte();
         m_compress = storage_type_is_compressed(header);
       }
 
@@ -3846,12 +3863,274 @@ namespace Constexpr {
     return EnumBuilder<Settings>{};
   }
 
-  template <typename E, std::uint32_t StringAndItemCapacity = reserve_space(256, 256)>
+  /**
+   * @brief Default fixed-capacity storage budget used by enum-description
+   * builders and wrappers when the caller does not override it.
+   */
+  constexpr std::uint32_t DefaultReserved{ reserve_space(256, 256) };
+
+  template <typename E, std::uint32_t StringAndItemCapacity = DefaultReserved>
   using DefaultEnumSettings = impl::EnumSettings<E, StringAndItemCapacity
   , std::variant<
       impl::Pairs<E>, impl::Named<E>, impl::Numeric<E>, impl::Cmds<E>, impl::Group<E>, impl::Conditional<E>
     >
   >;
+
+  /**
+   * @brief Runtime-erased wrapper around one decoded typed enum description.
+   *
+   * @tparam StringAndItemCapacity - Fixed backing storage capacity shared by
+   *   all typed alternatives.
+   */
+  template <std::uint32_t StringAndItemCapacity = DefaultReserved>
+  class AnyEnumDescription {
+    using variant_type = std::variant<
+      Enum<DefaultEnumSettings<std::int8_t,   StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::int16_t,  StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::int32_t,  StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::int64_t,  StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::uint8_t,  StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::uint16_t, StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::uint32_t, StringAndItemCapacity>>,
+      Enum<DefaultEnumSettings<std::uint64_t, StringAndItemCapacity>>
+    >;
+
+    eEnumStorageType m_storage_type{};
+    variant_type m_enum;
+
+  public:
+    /**
+     * @brief Wraps one decoded typed enum description with its selected storage
+     * discriminator.
+     *
+     * @tparam EnumT - Active typed enum alternative.
+     * @param storage_type - Underlying width/sign discriminator chosen from the
+     *   program header.
+     * @param enum_def - Decoded typed enum description.
+     */
+    template <typename EnumT>
+    constexpr AnyEnumDescription(eEnumStorageType storage_type, EnumT enum_def)
+    : m_storage_type{ storage_type }
+    , m_enum{ enum_def }
+    {
+    }
+
+    /**
+     * @brief Returns the active underlying width/sign discriminator.
+     *
+     * @return eEnumStorageType - Active width/sign discriminator without the
+     *   Compress bit.
+     */
+    constexpr eEnumStorageType storage_type() const noexcept {
+      return m_storage_type;
+    }
+
+    /**
+     * @brief Visits the active typed enum description.
+     *
+     * @tparam Visitor - Callable visitor type accepted by `std::visit`.
+     * @param visitor - Visitor invoked with the active typed enum alternative.
+     * @return decltype(auto) - Result of invoking \p visitor.
+     */
+    template <class Visitor>
+    decltype(auto) visit(Visitor&& visitor) const {
+      return std::visit(std::forward<Visitor>(visitor), m_enum);
+    }
+
+    /**
+     * @brief Returns the exact encoded program size for the active typed enum
+     * description.
+     *
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return std::size_t - Exact number of bytes required by
+     *   `output_program(...)`.
+     */
+    std::size_t program_size(
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return visit([&](auto const& enum_def) {
+        return enum_def.program_size(compress, append_terminate);
+      });
+    }
+
+    /**
+     * @brief Encodes the active typed enum description into one caller-owned
+     * buffer.
+     *
+     * @param begin - First writable byte in the destination buffer.
+     * @param end - One-past-the-end of the destination buffer.
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return char* - Pointer one past the last byte written.
+     */
+    char* output_program(
+      char* begin,
+      char* end,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return visit([&](auto const& enum_def) {
+        return enum_def.output_program(begin, end, compress, append_terminate);
+      });
+    }
+
+    /**
+     * @brief Encodes the active typed enum description into one runtime-owned
+     * string.
+     *
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return std::string - Runtime-owned encoded program bytes.
+     */
+    std::string output_program(
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return visit([&](auto const& enum_def) {
+        return enum_def.output_program(compress, append_terminate);
+      });
+    }
+
+    /**
+     * @brief Encodes the active typed enum description into one output stream.
+     *
+     * @param os - Destination output stream.
+     * @param compress - Whether constrained values should be dint-condensed.
+     * @param append_terminate - Whether to append an explicit Terminate opcode.
+     * @return std::ostream& - The same destination output stream.
+     */
+    std::ostream& output_program(
+      std::ostream& os,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return visit([&](auto const& enum_def) -> std::ostream& {
+        return enum_def.output_program(os, compress, append_terminate);
+      });
+    }
+  };
+
+  /**
+   * @brief Builder-like entrypoint for decoding variant-backed
+   * runtime-selected enum descriptions from transmitted programs.
+   *
+   * @tparam StringAndItemCapacity - Fixed backing storage capacity shared by
+   *   all typed alternatives.
+   */
+  template <std::uint32_t StringAndItemCapacity = DefaultReserved>
+  class AnyEnumBuilder {
+    std::string_view m_program{};
+    bool m_throw_on_terminate{ true };
+    bool m_has_program{ false };
+
+    using any_enum_type = AnyEnumDescription<StringAndItemCapacity>;
+
+    /**
+     * @brief Decodes the stored program through one concrete typed enum
+     * alternative selected from the header.
+     *
+     * @tparam ValueT - Concrete signed or unsigned integral value type.
+     * @param program - Definition stream including the storage header.
+     * @param throw_on_terminate - Whether Terminate is rejected as a parse
+     *   error.
+     * @return any_enum_type - Variant-backed runtime-selected wrapper around
+     *   the decoded typed enum description.
+     */
+    template <typename ValueT>
+    static constexpr any_enum_type decode_as(
+      std::string_view program,
+      bool throw_on_terminate)
+    {
+      using Settings = DefaultEnumSettings<ValueT, StringAndItemCapacity>;
+      return any_enum_type{
+        impl::storage_type_for_value_type<ValueT>(),
+        impl::EnumDecoder<Settings>{ program, throw_on_terminate }.decode()
+      };
+    }
+
+  public:
+    /**
+     * @brief Stores one program to decode during `Build()`.
+     *
+     * @param program - Definition stream including the storage header.
+     * @param throw_on_terminate - Whether a Terminate opcode is rejected as a
+     *   parse error.
+     * @return AnyEnumBuilder - Updated builder carrying the decode request.
+     */
+    constexpr AnyEnumBuilder decode_program(
+      std::string_view program,
+      bool throw_on_terminate = true) const
+    {
+      auto result{ *this };
+      result.m_program = program;
+      result.m_throw_on_terminate = throw_on_terminate;
+      result.m_has_program = true;
+      return result;
+    }
+
+    /**
+     * @brief Decodes the stored program into one variant-backed
+     * runtime-selected enum
+     * description.
+     *
+     * @return any_enum_type - Decoded variant-backed runtime-selected enum
+     *   description.
+     */
+    constexpr any_enum_type Build() const {
+      assert(m_has_program || !"decode_program() must be called before Build().");
+
+      auto const header{ impl::read_storage_header(m_program) };
+      switch (impl::storage_type_base(header)) {
+        case eEnumStorageType::Int8:
+          return decode_as<std::int8_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::Int16:
+          return decode_as<std::int16_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::Int32:
+          return decode_as<std::int32_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::Int64:
+          return decode_as<std::int64_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::UInt8:
+          return decode_as<std::uint8_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::UInt16:
+          return decode_as<std::uint16_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::UInt32:
+          return decode_as<std::uint32_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::UInt64:
+          return decode_as<std::uint64_t>(m_program, m_throw_on_terminate);
+        case eEnumStorageType::Compress:
+          assert(false && "Impossible: storage_type_base() masks out the Compress flag before dispatch.");
+          break;
+      }
+
+      assert(false && "read_storage_header() already validated the storage-type discriminator.");
+      throw EnumParseHeaderMismatch("Enum program header uses unsupported storage-type bits.");
+    }
+
+    /**
+     * @brief Returns the configured fixed-capacity storage budget.
+     *
+     * @return std::uint32_t - Packed string/item capacity summary.
+     */
+    constexpr std::uint32_t reserve_space() const noexcept {
+      return StringAndItemCapacity;
+    }
+  };
+
+  /**
+   * @brief Creates an empty variant-backed runtime-selected enum decode
+   * builder.
+   *
+   * @tparam StringAndItemCapacity - Fixed backing storage capacity shared by
+   *   all typed alternatives.
+   * @return AnyEnumBuilder<StringAndItemCapacity> - Empty variant-backed
+   *   runtime-selected decode builder.
+   */
+  template <std::uint32_t StringAndItemCapacity = DefaultReserved>
+  constexpr auto build_any_enum_description() {
+    return AnyEnumBuilder<StringAndItemCapacity>{};
+  }
 
 } // namespace Constexpr
 

@@ -9,7 +9,7 @@
   - [Future Enhancements](#future-enhancements)
     - [Output Format](#output-format)
     - [Encoding Format](#encoding-format)
-    - [Type Erasure](#type-erasure)
+    - [Runtime Type Selection](#runtime-type-selection)
 - [Usage Examples](#usage-examples)
   - [Naming Convention Used In These Examples](#naming-convention-used-in-these-examples)
   - [1. Build An Enum Description](#1-build-an-enum-description)
@@ -110,6 +110,7 @@ The accepted API direction for enum descriptions is:
   - `BUILD_ENUM_DESCRIPTION(EnumType, ...)` when the default two-pass shrink-to-fit macro is desired
 - runtime and constexpr stream decoding is exposed through the builder chain:
   - `build_enum_description<Settings>().decode_program(program_sv, throw_on_terminate).Build()`
+  - `build_any_enum_description<StringAndItemCapacity>().decode_program(program_sv, throw_on_terminate).Build()`
 - stream emission is exposed on `Enum` itself:
   - `program_size(compress, append_terminate)`
   - `output_program(char* begin, char* end, compress, append_terminate)`
@@ -182,11 +183,21 @@ should encode as `GroupIf` with a normal `Numeric` command inside the branch ins
 Since a group mask shall only be one bit, instead of encoding the bitmask as the underlying type or dint-condensed
 underlying type, we can replace that with an unsigned char to signify which bit is set.
 
-#### Type Erasure
+#### Runtime Type Selection
 
-There should to be a way to specify the width and sign of the underlying type in a runtime way because otherwise the
-receiver of the Enum program would have to parse the Enum program every time it has to deal with an Enum type that was
-sent by wire.
+The by-wire program already carries the underlying width and signedness in its one-byte storage header. The missing
+piece is a variant-backed runtime-selected decoded holder for receivers that do not know the enum value type at
+compile time.
+
+`build_any_enum_description<...>().decode_program(...).Build()` fills that gap. It reads the header once, dispatches to
+the matching typed decoder, and stores the result in `AnyEnumDescription<StringAndItemCapacity>`, which is backed by a
+private `std::variant` of the 8 concrete signed and unsigned integer enum-description types.
+
+That means the receiver parses the transmitted program once, keeps the decoded description, and then reuses it through
+`visit(...)`, `program_size(...)`, and `output_program(...)` without reparsing the original bytes.
+
+A future implementation could still move to a single max-width erased representation if that ever becomes more
+ergonomic than the visitor-based wrapper.
 
 ## Usage Examples
 
@@ -303,6 +314,23 @@ std::string text{ decoded(eMode::Busy).to_string() };
 
 Pass `false` for `throw_on_terminate` when `Terminate` should be treated as a
 legal end-of-program marker instead of a parse error.
+
+When the receiver does not know the enum value type at compile time, use the
+variant-backed runtime-selected decode path instead:
+
+```cpp
+auto AnyDesc = Constexpr::build_any_enum_description<Constexpr::reserve_space(512, 512)>()
+  .decode_program(program)
+  .Build();
+
+std::string text{
+  AnyDesc.visit([](auto const& TypedDesc) {
+    using Value = typename std::decay_t<decltype(TypedDesc)>::value_type;
+    return TypedDesc(static_cast<Value>(0x01u)).to_string();
+  })
+};
+// text == "BUSY"
+```
 
 ### 5. Re-Emit A Program Into A Fixed Buffer
 

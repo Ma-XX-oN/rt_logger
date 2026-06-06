@@ -344,6 +344,7 @@ The short version is:
 - the public round-trip surface is:
   - `BUILD_ENUM_DESCRIPTION(...)` or `build_enum_description<Settings>() ... .Build()`
   - `.decode_program(program_sv, throw_on_terminate).Build()` for decode
+  - `build_any_enum_description<StringAndItemCapacity>() ... .decode_program(...).Build()` for variant-backed runtime-selected decode
   - `Enum::program_size()` and `Enum::output_program(...)` for re-emission
 
 ### Packet Design

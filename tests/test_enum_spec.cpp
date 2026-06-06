@@ -23,6 +23,7 @@ using TestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_
 using LargeTestSettings = Constexpr::impl::EnumSettings<TestEnum, Constexpr::reserve_space(256, 64), TestItemVariant>;
 using TestEnumDef = Constexpr::Enum<TestSettings>;
 using LargeTestEnumDef = Constexpr::Enum<LargeTestSettings>;
+using AnyTestEnumDef = Constexpr::AnyEnumDescription<Constexpr::reserve_space(128, 32)>;
 using TestBuilder = Constexpr::EnumBuilder<TestSettings>;
 using TestEncoder = Constexpr::impl::EnumEncoder<TestEnumDef>;
 using TestItemId = Constexpr::item_id_t;
@@ -237,6 +238,48 @@ Constexpr::Enum<Settings> decode_program(std::string_view program, bool throw_on
   return Constexpr::build_enum_description<Settings>()
     .decode_program(program, throw_on_terminate)
     .Build();
+}
+
+/**
+ * @brief Decodes one runtime enum stream through the variant-backed
+ * runtime-selected builder chain.
+ *
+ * @tparam StringAndItemCapacity - Fixed backing storage capacity for the
+ *   variant-backed runtime-selected decode result.
+ * @param program - Runtime-owned program bytes.
+ * @param throw_on_terminate - Whether a Terminate opcode is rejected.
+ * @return Constexpr::AnyEnumDescription<StringAndItemCapacity> - Decoded
+ *   variant-backed runtime-selected enum description.
+ */
+template <std::uint32_t StringAndItemCapacity = Constexpr::reserve_space(128, 32)>
+Constexpr::AnyEnumDescription<StringAndItemCapacity> decode_any_program(
+  std::string_view program,
+  bool throw_on_terminate = true)
+{
+  return Constexpr::build_any_enum_description<StringAndItemCapacity>()
+    .decode_program(program, throw_on_terminate)
+    .Build();
+}
+
+/**
+ * @brief Renders one runtime value through a variant-backed runtime-selected
+ * enum description.
+ *
+ * @tparam StringAndItemCapacity - Fixed backing storage capacity of the
+ *   variant-backed runtime-selected enum description.
+ * @param enum_def - Variant-backed runtime-selected enum description.
+ * @param value - Raw runtime value widened to an unsigned helper type.
+ * @return std::string - Rendered output text.
+ */
+template <std::uint32_t StringAndItemCapacity>
+std::string render_any_enum(
+  Constexpr::AnyEnumDescription<StringAndItemCapacity> const& enum_def,
+  std::uint64_t value)
+{
+  return enum_def.visit([&](auto const& typed_enum) {
+    using Value = typename std::decay_t<decltype(typed_enum)>::value_type;
+    return render_enum_value(typed_enum, static_cast<Value>(value));
+  });
 }
 
 /**
@@ -985,6 +1028,104 @@ TEST(EnumSpecBuilder, CanonicalizesEmptyConditionalBranches)
     ""
   );
 #endif
+}
+
+TEST(EnumSpecAnyDecode, HeaderOnlyProgramsDispatchAllStorageKinds)
+{
+  // The variant-backed runtime-selected builder should dispatch each supported storage header into the matching typed alternative.
+  auto expect_header_only = [](auto example_value) {
+    using ValueT = decltype(example_value);
+
+    std::string const program{
+      static_cast<char>(storage_header_for<ValueT>())
+    };
+
+    auto const any_enum{ decode_any_program(program) };
+    EXPECT_EQ(any_enum.storage_type(), Constexpr::impl::storage_type_for_value_type<ValueT>());
+    EXPECT_EQ(any_enum.program_size(), program.size());
+    EXPECT_EQ(any_enum.output_program(), program);
+  };
+
+  expect_header_only(std::int8_t{});
+  expect_header_only(std::int16_t{});
+  expect_header_only(std::int32_t{});
+  expect_header_only(std::int64_t{});
+  expect_header_only(std::uint8_t{});
+  expect_header_only(std::uint16_t{});
+  expect_header_only(std::uint32_t{});
+  expect_header_only(std::uint64_t{});
+}
+
+TEST(EnumSpecAnyDecode, RoundTripsProgramsAndVisitsTheActiveTypedDescription)
+{
+  // The variant-backed runtime-selected wrapper should re-emit the original stream and allow repeated rendering through visit().
+  std::string const program{ kDecodeProgramSv };
+  AnyTestEnumDef const any_enum{ decode_any_program(program) };
+
+  EXPECT_EQ(any_enum.storage_type(), eEnumStorageType::UInt8);
+  EXPECT_EQ(any_enum.output_program(), program);
+  EXPECT_EQ(render_any_enum(any_enum, 0x01u), "one");
+  EXPECT_EQ(render_any_enum(any_enum, 0x02u), "two");
+
+  std::ostringstream stream{};
+  EXPECT_EQ(&any_enum.output_program(stream), &stream);
+  EXPECT_EQ(stream.str(), program);
+}
+
+TEST(EnumSpecAnyDecode, HonorsConfiguredStringAndItemCapacities)
+{
+  // The variant-backed runtime-selected builder should enforce the same fixed-capacity limits as the typed decoder.
+  std::string oversized_name{
+    static_cast<char>(storage_header_for<TestEnum>())
+  };
+  oversized_name.push_back(static_cast<char>(eEnumCommand::Named));
+  oversized_name.push_back(static_cast<char>(0x01u));
+  oversized_name.append(128u, 'x');
+  oversized_name.push_back('\0');
+
+  EXPECT_THROW(
+    (void)decode_any_program<Constexpr::reserve_space(4, 32)>(oversized_name),
+    Constexpr::EnumParseCapacityExceeded);
+
+  EXPECT_THROW(
+    (void)decode_any_program<Constexpr::reserve_space(128, 3)>(kDecodeProgramSv),
+    Constexpr::EnumParseCapacityExceeded);
+
+  auto const any_enum{
+    decode_any_program<Constexpr::reserve_space(128, 4)>(kDecodeProgramSv)
+  };
+  EXPECT_EQ(any_enum.output_program(), std::string{ kDecodeProgramSv });
+}
+
+TEST(EnumSpecAnyDecode, ReportsParseErrorsAndTerminatePolicy)
+{
+  // The variant-backed runtime-selected decode path should surface the same parse errors as the typed decoder and honor throw_on_terminate.
+  EXPECT_THROW((void)decode_any_program(std::string_view{}), Constexpr::EnumParseEmptyInput);
+
+  std::string const unsupported_header{
+    static_cast<char>(0xF0u)
+  };
+  EXPECT_THROW((void)decode_any_program(unsupported_header), Constexpr::EnumParseHeaderMismatch);
+
+  std::string const invalid_numeric_opcode{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<unsigned char>(eEnumCommand::Numeric) | 0x08u));
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu));
+      writer.write_c_string("bits");
+    })
+  };
+  EXPECT_THROW((void)decode_any_program(invalid_numeric_opcode), Constexpr::EnumParseInvalidOpcode);
+
+  std::string const terminated_program{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::Terminate);
+    })
+  };
+  EXPECT_THROW((void)decode_any_program(terminated_program, true), Constexpr::EnumParseInvalidStructure);
+
+  AnyTestEnumDef const any_enum{ decode_any_program(terminated_program, false) };
+  EXPECT_EQ(any_enum.output_program(false, true), terminated_program);
 }
 
 TEST(EnumSpecDecode, HeaderOnlyProgramBuildsEmptyEnum)
