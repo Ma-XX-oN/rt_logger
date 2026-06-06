@@ -123,7 +123,7 @@ constexpr std::uint8_t u8(std::byte value) {
  * @return ItB - Iterator one past the last byte written.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
+constexpr ItB encode_int(ItB dst_begin_it, [[maybe_unused]] ItE const dst_end_it, T value) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
@@ -177,7 +177,7 @@ constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
  * @return T& - \p v_dst.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr T& decode_int(T& v_dst, ItB& src_begin_it, ItE src_end_it) {
+constexpr T& decode_int(T& v_dst, ItB& src_begin_it, [[maybe_unused]] ItE src_end_it) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
@@ -253,7 +253,7 @@ constexpr T decode_int(ItB& src_begin_it, ItE src_end_it) {
  * @return Iterator one past the last byte written.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr ItB encode_dint(ItB dst_begin_it, ItE const dst_end_it, T v_src) {
+constexpr ItB encode_dint(ItB dst_begin_it, [[maybe_unused]] ItE const dst_end_it, T v_src) {
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
