@@ -1644,20 +1644,6 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   oversized_name.push_back('\0');
   EXPECT_THROW((void)decode_program(oversized_name), Constexpr::EnumParseCapacityExceeded);
 
-  std::string const header_only{
-    static_cast<char>(storage_header_for<TestEnum>())
-  };
-#ifdef NDEBUG
-  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
-#else
-  EXPECT_DEATH(
-    (void)Constexpr::build_enum_description<TestSettings>()
-      .Named(TestEnum{ 0x01u }, "one")
-      .decode_program(header_only)
-      .Build(),
-    ""
-  );
-#endif
 }
 
 TEST(EnumSpecRender, RendersNonzeroNamedCountsWithoutExtraSeparators)

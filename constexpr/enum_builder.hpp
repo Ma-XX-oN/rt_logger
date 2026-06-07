@@ -987,15 +987,6 @@ namespace Constexpr {
         *this, negate_first, group_bitmask, scope_bitmask, group_name, has_group_name);
     }
 
-    /**
-     * @brief Returns whether the builder still represents an empty root scope.
-     *
-     * @return bool - \c true when no root commands or stored payload exist yet.
-     */
-    constexpr bool is_empty_builder() const noexcept {
-      return m_state.first_cmd_id == 0u && m_enum.used_space() == 0u;
-    }
-
   public:
     using settings_type = Settings;
     using enum_type = Enum<Settings>;
@@ -1018,48 +1009,6 @@ namespace Constexpr {
     }
 
     /**
-     * @brief Decode one definition stream as a terminal builder-chain step.
-     *
-     * After calling this function, only \c Build() and \c used_space() stay
-     * available on the returned wrapper.
-     *
-     * @param program - Definition stream including the storage-type header.
-     * @param throw_on_terminate - Whether a Terminate opcode is rejected as a
-     *   parse error.
-     * @return DecodedEnumBuilder<Settings> - Terminal wrapper around the
-     *   decoded enum representation.
-     */
-    constexpr DecodedEnumBuilder<Settings> decode_program(
-      std::string_view program,
-      bool throw_on_terminate = true) const
-    {
-      assert(is_empty_builder() || !"decode_program() is only valid on an empty root builder.");
-
-      return DecodedEnumBuilder<Settings>{
-        impl::EnumDecoder<Settings>{ program, throw_on_terminate }.decode()
-      };
-    }
-
-    /**
-     * @brief Allows to specify a default for string and items for the Enum.
-     *
-     * NOTE: Use only at the very beginning as any previous commands will be
-     *       lost.
-     *
-     * @tparam string_space - Number of string characters + NUL allocated for
-     *   string storage.
-     * @tparam item_space - Number of internal representational commands
-     *   allocated (Named, Numeric, Pairs, Cmds, Conditional, Group)
-     * @return EnumBuilder<NewSettings> - The new EnumBuilder.
-     */
-    template <std::uint16_t string_space, std::uint16_t item_space>
-    constexpr auto reserve_space() {
-      assert(is_empty_builder() || !"reserve_space() is only valid on an empty root builder.");
-
-      return EnumBuilder<EnumSettings<typename Settings::value_type, pack_space(string_space, item_space)>>{};
-    }
-
-    /**
      * @brief Returns the configured fixed-capacity storage budget.
      *
      * @return std::uint32_t - Packed string/item capacity summary.
@@ -1070,14 +1019,74 @@ namespace Constexpr {
   };
 
   /**
+   * @brief Entry-point builder returned by \c build_enum_description().
+   *
+   * Inherits all fluent chaining ops from \c EnumBuilder<Settings> (via
+   * \c CommandScopeFacade<EnumBuilder<Settings>>).  Because the CRTP target
+   * is \c EnumBuilder<Settings>, every fluent call returns
+   * \c EnumBuilder<Settings>& — dropping the root wrapper automatically after
+   * the first entry is added.
+   *
+   * Adds two operations that are only valid before any entries are appended:
+   *   - \c reserve_space<S,I>() — returns a fresh \c EnumBuilderRoot with
+   *     reconfigured storage capacities.
+   *   - \c decode_program()    — decodes a serialised definition stream and
+   *     returns a \c DecodedEnumBuilder terminal.
+   *
+   * @tparam Settings - Representation settings matching the enclosed builder.
+   */
+  template <typename Settings>
+  class EnumBuilderRoot : public EnumBuilder<Settings> {
+  public:
+    using settings_type = Settings;
+    using value_type = typename Settings::value_type;
+
+    /**
+     * @brief Construct an empty root enum builder.
+     */
+    constexpr EnumBuilderRoot() noexcept = default;
+
+    /**
+     * @brief Return a fresh root builder with reconfigured storage capacities.
+     *
+     * @tparam string_space - Characters (+ NUL) allocated for string storage.
+     * @tparam item_space - Slots for internal representational commands.
+     * @return EnumBuilderRoot<NewSettings> - Empty root builder with new capacity.
+     */
+    template <std::uint16_t string_space, std::uint16_t item_space>
+    constexpr auto reserve_space() const {
+      return EnumBuilderRoot<EnumSettings<value_type, pack_space(string_space, item_space)>>{};
+    }
+
+    /**
+     * @brief Decode a serialised definition stream as a terminal chain step.
+     *
+     * After calling this function only \c Build() and \c used_space() are
+     * available on the returned wrapper.
+     *
+     * @param program - Definition stream including the storage-type header.
+     * @param throw_on_terminate - Whether a Terminate opcode is a parse error.
+     * @return DecodedEnumBuilder<Settings> - Terminal wrapper around the decoded enum.
+     */
+    constexpr DecodedEnumBuilder<Settings> decode_program(
+      std::string_view program,
+      bool throw_on_terminate = true) const
+    {
+      return DecodedEnumBuilder<Settings>{
+        impl::EnumDecoder<Settings>{ program, throw_on_terminate }.decode()
+      };
+    }
+  };
+
+  /**
    * @brief Create an empty typed-chaining enum builder.
    *
    * @tparam Settings - Representation settings for the stored enum graph.
-   * @return EnumBuilder<Settings> - Empty builder.
+   * @return EnumBuilderRoot<Settings> - Empty root builder.
    */
   template <typename Settings>
   constexpr auto build_enum_description() {
-    return EnumBuilder<Settings>{};
+    return EnumBuilderRoot<Settings>{};
   }
 
 } // namespace Constexpr
