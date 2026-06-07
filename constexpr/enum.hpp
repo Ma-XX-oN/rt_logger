@@ -68,7 +68,7 @@ enum eEnumCommand : std::uint8_t {
 
 /**
  * @brief Describes the stored underlying type and constrained-value encoding
- * mode for one definition stream.
+ *   mode for one definition stream.
  */
 enum eEnumStorageType : std::uint8_t {
   Int8     = 0x00,
@@ -100,7 +100,7 @@ public:
 
 /**
  * @brief Reports that the decoded storage-type header does not match the
- * requested enum value type.
+ *   requested enum value type.
  */
 class EnumParseHeaderMismatch : public EnumParseError {
 public:
@@ -109,7 +109,7 @@ public:
 
 /**
  * @brief Reports that the stream ended before the current item could be fully
- * decoded.
+ *   decoded.
  */
 class EnumParseUnexpectedEof : public EnumParseError {
 public:
@@ -126,7 +126,7 @@ public:
 
 /**
  * @brief Reports that the stream violates one of the enum grammar or graph
- * invariants.
+ *   invariants.
  */
 class EnumParseInvalidStructure : public EnumParseError {
 public:
@@ -135,7 +135,7 @@ public:
 
 /**
  * @brief Reports that the decoded payload exceeds the destination enum's fixed
- * string or item capacity.
+ *   string or item capacity.
  */
 class EnumParseCapacityExceeded : public EnumParseError {
 public:
@@ -197,7 +197,7 @@ struct BitwiseOps<Constexpr::eEnumStorageType> : std::true_type {};
 //
 //        Named : Cmd {
 //          bool has_mask
-//          E mask 
+//          E mask
 //          Pairs first_pair_id
 //          Pairs last_pair_id  // optimisation
 //
@@ -220,7 +220,7 @@ struct BitwiseOps<Constexpr::eEnumStorageType> : std::true_type {};
 //        } 2 items
 //
 //        Group {
-//          Str name_string_id 
+//          Str name_string_id
 //          Cmds first_cmd_id
 //          Cmds last_cmd_id    // optimisation
 //
@@ -228,7 +228,7 @@ struct BitwiseOps<Constexpr::eEnumStorageType> : std::true_type {};
 //        } 3 items + 1
 //
 //        Conditional : Cmd {
-//          E group_bitmask 
+//          E group_bitmask
 //          Group true_commands_id
 //          Group false_commands_id
 //
@@ -270,7 +270,7 @@ namespace Constexpr {
 
   /**
    * @brief Used to pack string_space and item_space into one number.
-   * 
+   *
    * @param string_space - Space to allocate for strings.
    * @param item_space - Space to allocate for items.
    * @return std::uint32_t - Packed values.
@@ -278,7 +278,7 @@ namespace Constexpr {
   constexpr std::uint32_t pack_space(std::uint16_t string_space, std::uint16_t item_space) {
     return static_cast<std::uint32_t>(string_space) | (static_cast<std::uint32_t>(item_space) << 16);
   }
-  
+
   namespace impl {
 
     template <typename Parent>
@@ -297,7 +297,7 @@ namespace Constexpr {
 
     /**
      * @brief Extract the string space value out of the packed 32 bit number.
-     * 
+     *
      * @param packed_value - Packed value to extract from.
      * @return std::uint16_t - Unpacked string space value.
      */
@@ -307,7 +307,7 @@ namespace Constexpr {
 
     /**
      * @brief Extract the item space value out of the packed 32 bit number.
-     * 
+     *
      * @param packed_value - Packed value to extract from.
      * @return std::uint16_t - Unpacked item space value.
      */
@@ -671,7 +671,7 @@ namespace Constexpr {
 
     /**
      * @brief Returns whether one storage-type header enables condensed integer
-     * encoding.
+     *   encoding.
      *
      * @param header - Decoded storage-type header.
      * @return bool - \c true when constrained values are dint-condensed.
@@ -692,7 +692,7 @@ namespace Constexpr {
 
     /**
      * @brief Reads and validates the one-byte storage-type header prefix of one
-     * enum definition stream.
+     *   enum definition stream.
      *
      * @param program - Definition stream including the header byte.
      * @return eEnumStorageType - Decoded storage-type header including the
@@ -729,7 +729,7 @@ namespace Constexpr {
       }
       return header;
     }
-    
+
     constexpr inline size_t max_items_for_block(eBlockType block_type) {
       constexpr size_t counts [] { 15, 8, 16, 32 };
       return counts[to_underlying(block_type & eBlockType::mMaxCount)];
@@ -1035,14 +1035,14 @@ namespace Constexpr {
 
     /**
      * @brief Creates a new scope that can limit the number of items to be
-     * generated in a first block and returns how many were.
+     *   generated in a first block and returns how many were.
      *
      * @tparam EnumT - Referenced enum representation type.
      * @tparam FnEncodeBlock - Callback type used to encode the child block.
      * @param ec - Active encoder for the parent scope.
      * @param block_type - Shape of the block being emitted.
      * @param fn_encode_block - Callback that emits the child block using a
-     * copied encoder.
+     *   copied encoder.
      * @return size_t - Number of elements stored in first block.
      */
     template <typename EnumT, typename WriterT, typename FnEncodeBlock>
@@ -1294,7 +1294,7 @@ namespace Constexpr {
           ? if_opcode | eEnumCommand::fHasGroupName
           : if_opcode
         };
-        
+
 
         // EMITTING IF AND MASKS
         auto const if_pc{ ec.reserve_byte() };
@@ -1303,8 +1303,8 @@ namespace Constexpr {
         if (if_group && if_group->name_id) {
           ec.encode_string(if_group->name_id);
         }
-        
-        
+
+
         // EMITTING IF BLOCK
         auto if_ec { ec };
         if_ec.set_scope_bitmask(bitmask);
@@ -1737,7 +1737,7 @@ namespace Constexpr {
      *       CommandScopeState<Value>
      *     inherits:
      *       CommandScopeFacade<EnumBuilder<Settings>>
-     *   
+     *
      *   CommandScopeFacade<Derived>
      *     provides fluent ops:
      *       Named
@@ -1748,7 +1748,7 @@ namespace Constexpr {
      *       command_state()
      *       on_first_command()
      *       begin_if_impl()
-     *   
+     *
      *   IfScope<Parent>
      *     owns:
      *       Parent
@@ -1760,7 +1760,7 @@ namespace Constexpr {
      *     extra ops:
      *       Else(...)
      *       End() -> Parent
-     *   
+     *
      *   ElseScope<Parent>
      *     owns:
      *       Parent
@@ -1777,23 +1777,23 @@ namespace Constexpr {
      *     -> ensure/create impl::Named
      *     -> append impl::Pairs
      *     -> ensure root/branch impl::Cmds exists
-     *   
+     *
      *   Number(mask, "bits")
      *     -> create impl::Numeric
      *     -> append impl::Cmds
-     *   
+     *
      *   If / IfNot
      *     -> create impl::Conditional
      *     -> create first impl::Group
      *     -> return IfScope<Parent>
-     *   
+     *
      *   Else
      *     -> create second impl::Group
      *     -> return ElseScope<Parent>
-     *   
+     *
      *   End
      *     -> return exact Parent type
-     *   
+     *
      *   Build
      *     -> return Enum<Settings>
      *     -> set root cmds_id
@@ -1801,7 +1801,7 @@ namespace Constexpr {
 
     /**
      * @brief Tracks the currently open implicit named command inside one
-     * command scope while building an enum graph.
+     *   command scope while building an enum graph.
      *
      * @tparam E - Enum or integer value type.
      */
@@ -1916,7 +1916,7 @@ namespace Constexpr {
 
       /**
        * @brief Start a conditional scope whose first user-authored branch is the
-       * false case.
+       *   false case.
        *
        * @param group_bitmask - Single-bit selector for the branch.
        * @param scope_bitmask - Scope bitmask to apply inside the branch.
@@ -1932,7 +1932,7 @@ namespace Constexpr {
 
       /**
        * @brief Start a named conditional scope whose first user-authored branch
-       * is the false case.
+       *   is the false case.
        *
        * @param group_bitmask - Single-bit selector for the branch.
        * @param scope_bitmask - Scope bitmask to apply inside the branch.
@@ -2028,7 +2028,7 @@ namespace Constexpr {
 
       /**
        * @brief Ensure that a matching implicit named command exists in the
-       * current command scope.
+       *   current command scope.
        *
        * @param scope - Command scope being updated.
        * @param has_mask - Whether the named command uses a command-local bitmask.
@@ -2066,7 +2066,7 @@ namespace Constexpr {
 
       /**
        * @brief Append one pair to the implicit named target, creating it when
-       * needed.
+       *   needed.
        *
        * @param scope - Command scope being updated.
        * @param has_mask - Whether the named command uses a command-local bitmask.
@@ -2126,11 +2126,11 @@ namespace Constexpr {
 
       /**
        * @brief Start one conditional branch scope and append the owning
-       * conditional command to the current scope.
+       *   conditional command to the current scope.
        *
        * @param scope - Command scope being updated.
        * @param negate_first - Whether the first user-authored branch is the
-       * false branch.
+       *   false branch.
        * @param group_bitmask - Single-bit selector for the conditional.
        * @param scope_bitmask - Scope bitmask applied inside the branch.
        * @param group_name - Optional group label for the first branch.
@@ -2251,7 +2251,7 @@ namespace Constexpr {
        * @brief Start one nested conditional scope inside this branch.
        *
        * @param negate_first - Whether the first user-authored branch is the
-       * false branch.
+       *   false branch.
        * @param group_bitmask - Single-bit selector for the conditional.
        * @param scope_bitmask - Scope bitmask applied inside the branch.
        * @param group_name - Optional group label for the first branch.
@@ -2320,7 +2320,7 @@ namespace Constexpr {
     private:
       /**
        * @brief Returns whether the active branch has emitted at least one
-       * command node.
+       *   command node.
        *
        * @return bool - \c true when the active branch owns a command list.
        */
@@ -2330,7 +2330,7 @@ namespace Constexpr {
 
       /**
        * @brief Rebinds an empty first branch so the same stored group becomes
-       * the else branch instead of leaving an empty if-side group behind.
+       *   the else branch instead of leaving an empty if-side group behind.
        *
        * @param group_name - Optional group label for the else branch.
        * @param has_group_name - Whether `group_name` should be stored.
@@ -2360,7 +2360,7 @@ namespace Constexpr {
 
       /**
        * @brief Finalizes this if scope while rejecting a fully empty leading
-       * branch that never transitioned into a non-empty else branch.
+       *   branch that never transitioned into a non-empty else branch.
        *
        * @return Parent - Updated parent scope.
        */
@@ -2488,7 +2488,7 @@ namespace Constexpr {
        * @brief Start one nested conditional scope inside this branch.
        *
        * @param negate_first - Whether the first user-authored branch is the
-       * false branch.
+       *   false branch.
        * @param group_bitmask - Single-bit selector for the conditional.
        * @param scope_bitmask - Scope bitmask applied inside the branch.
        * @param group_name - Optional group label for the first branch.
@@ -2538,7 +2538,7 @@ namespace Constexpr {
     private:
       /**
        * @brief Returns whether the active else branch has emitted at least one
-       * command node.
+       *   command node.
        *
        * @return bool - \c true when the active else branch owns a command list.
        */
@@ -2548,7 +2548,7 @@ namespace Constexpr {
 
       /**
        * @brief Finalizes this else scope, dropping a trailing empty else branch
-       * or rejecting a fully empty conditional.
+       *   or rejecting a fully empty conditional.
        *
        * @return Parent - Updated parent scope.
        */
@@ -2590,7 +2590,7 @@ namespace Constexpr {
       impl::Pairs<value_type>, impl::Named<value_type>, impl::Numeric<value_type>,
       impl::Cmds<value_type>, impl::Group<value_type>, impl::Conditional<value_type>
     >;
-    
+
   private:
     item_id_t m_cmds_id{};
     Strings<Settings::MAX_STRING_STORAGE> strings{};
@@ -2627,7 +2627,7 @@ namespace Constexpr {
   public:
     /**
      * @brief Packed value containing the amount of string and items currently being used.
-     * 
+     *
      * @return std::uint32_t - The packed used space.
      */
     constexpr std::uint32_t used_space() const {
@@ -2636,7 +2636,7 @@ namespace Constexpr {
 
     /**
      * @brief Packed value containing the amount of string and items allocated.
-     * 
+     *
      * @return std::uint32_t - The packed allocated space.
      */
     constexpr std::uint32_t allocated_space() const {
@@ -2930,7 +2930,7 @@ namespace Constexpr {
 
     /**
      * @brief Cursor-based decoder that rebuilds one stored enum graph from a
-     * definition stream.
+     *   definition stream.
      *
      * @tparam Settings - Destination enum storage settings.
      */
@@ -2950,7 +2950,7 @@ namespace Constexpr {
 
       /**
        * @brief Returns the all-bits-set root scope for the configured value
-       * type.
+       *   type.
        *
        * @return value_type - Root scope bitmask.
        */
@@ -2960,7 +2960,7 @@ namespace Constexpr {
 
       /**
        * @brief Returns whether the source cursor reached the end of the
-       * program.
+       *   program.
        *
        * @return bool - \c true when no unread bytes remain.
        */
@@ -3018,7 +3018,7 @@ namespace Constexpr {
 
       /**
        * @brief Validates that a constrained value fits inside the current
-       * parent scope.
+       *   parent scope.
        *
        * @param value - Candidate constrained value.
        * @param scope_bitmask - Parent scope bitmask.
@@ -3032,7 +3032,7 @@ namespace Constexpr {
 
       /**
        * @brief Validates that one conditional selector mask has exactly one bit
-       * set.
+       *   set.
        *
        * @param group_bitmask - Conditional selector bitmask.
        * @throws EnumParseInvalidStructure when \p group_bitmask does not
@@ -3047,7 +3047,7 @@ namespace Constexpr {
 
       /**
        * @brief Ensures the destination enum has enough remaining string space
-       * for a copied stream string.
+       *   for a copied stream string.
        *
        * @param bytes_to_add - Number of bytes including the trailing NUL.
        * @throws EnumParseCapacityExceeded when the destination string heap
@@ -3062,7 +3062,7 @@ namespace Constexpr {
 
       /**
        * @brief Ensures the destination enum has enough remaining item space
-       * for one more stored object.
+       *   for one more stored object.
        *
        * @throws EnumParseCapacityExceeded when the destination item heap would
        *   overflow.
@@ -3100,7 +3100,7 @@ namespace Constexpr {
 
       /**
        * @brief Reads one NUL-terminated string from the source without keeping a
-       * view alive beyond the current parse step.
+       *   view alive beyond the current parse step.
        *
        * @return std::string_view - Transient view of the unread source buffer.
        * @throws EnumParseUnexpectedEof when the source string is not
@@ -3210,7 +3210,7 @@ namespace Constexpr {
 
       /**
        * @brief Verifies that one decoded named block does not reuse the same
-       * masked enum value.
+       *   masked enum value.
        *
        * @param named_id - Stored named-command id being extended.
        * @param value - Candidate pair value.
@@ -3287,7 +3287,7 @@ namespace Constexpr {
 
       /**
        * @brief Validates that a raw opcode byte uses only the supported numeric
-       * format bits.
+       *   format bits.
        *
        * @param opcode - Raw numeric opcode byte.
        * @throws EnumParseInvalidOpcode when unsupported reserved bits are set.
@@ -3323,7 +3323,7 @@ namespace Constexpr {
 
       /**
        * @brief Decodes one named-pair payload block plus any postfix pair
-       * continuations.
+       *   continuations.
        *
        * @param initial_count - Number of pairs carried by the opening opcode.
        * @param pair_scope_bitmask - Active bitmask for the pair values.
@@ -3363,7 +3363,7 @@ namespace Constexpr {
 
       /**
        * @brief Decodes one command-branch payload block plus any postfix
-       * command continuations.
+       *   command continuations.
        *
        * @param initial_count - Number of command constructs carried by the
        *   opening opcode.
@@ -3611,7 +3611,7 @@ namespace Constexpr {
 
       /**
        * @brief Decodes the unbounded root command list until the program ends or
-       * an accepted Terminate opcode is reached.
+       *   an accepted Terminate opcode is reached.
        *
        * @return item_id_t - Stored head command-list id.
        */
@@ -3663,7 +3663,7 @@ namespace Constexpr {
 
       /**
        * @brief Decodes the entire source program into one immutable enum
-       * representation.
+       *   representation.
        *
        * @return enum_type - Fully rebuilt enum graph.
        */
@@ -3719,7 +3719,7 @@ namespace Constexpr {
 
   /**
    * @brief Default fixed-capacity storage budget used by enum-description
-   * builders and wrappers when the caller does not override it.
+   *   builders and wrappers when the caller does not override it.
    */
   constexpr std::uint32_t DefaultReserved{ pack_space(256, 128) };
 
@@ -3888,7 +3888,7 @@ namespace Constexpr {
         impl::EnumDecoder<Settings>{ program, throw_on_terminate }.decode()
       };
     }
-    
+
     /**
      * @brief Allows to specify a default for string and items for the Enum.
      *
@@ -3954,7 +3954,7 @@ namespace Constexpr {
   public:
     /**
      * @brief Wraps one decoded typed enum description with its selected storage
-     * discriminator.
+     *   discriminator.
      *
      * @tparam EnumT - Active typed enum alternative.
      * @param storage_type - Underlying width/sign discriminator chosen from the
@@ -4080,7 +4080,7 @@ namespace Constexpr {
 
     /**
      * @brief Returns the exact encoded program size for the active typed enum
-     * description.
+     *   description.
      *
      * @param compress - Whether constrained values should be dint-condensed.
      * @param append_terminate - Whether to append an explicit Terminate opcode.
@@ -4098,7 +4098,7 @@ namespace Constexpr {
 
     /**
      * @brief Encodes the active typed enum description into one caller-owned
-     * buffer.
+     *   buffer.
      *
      * @param begin - First writable byte in the destination buffer.
      * @param end - One-past-the-end of the destination buffer.
@@ -4119,7 +4119,7 @@ namespace Constexpr {
 
     /**
      * @brief Encodes the active typed enum description into one runtime-owned
-     * string.
+     *   string.
      *
      * @param compress - Whether constrained values should be dint-condensed.
      * @param append_terminate - Whether to append an explicit Terminate opcode.
@@ -4268,7 +4268,7 @@ namespace Constexpr {
 
     /**
      * @brief Decodes the stored program through one concrete typed enum
-     * alternative selected from the header.
+     *   alternative selected from the header.
      *
      * @tparam ValueT - Concrete signed or unsigned integral value type.
      * @param program - Definition stream including the storage header.
@@ -4311,8 +4311,7 @@ namespace Constexpr {
 
     /**
      * @brief Decodes the stored program into one variant-backed
-     * runtime-selected enum
-     * description.
+     *   runtime-selected enum description.
      *
      * @return any_enum_type - Decoded variant-backed runtime-selected enum
      *   description.
@@ -4375,7 +4374,7 @@ namespace Constexpr {
 
 /**
  * @brief Build a Enum type as small as possible in compiler space.
- * 
+ *
  * @example
  *
  * ```cpp
