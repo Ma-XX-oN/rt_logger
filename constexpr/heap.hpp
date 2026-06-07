@@ -16,6 +16,7 @@
 #include <limits>
 #include <string_view>
 #include <array>
+#include <cassert>
 #include "constexpr/string.hpp"
 
 namespace Constexpr {
@@ -160,7 +161,7 @@ namespace Constexpr {
       * @return auto& - Reference to the stored item slot.
       */
     constexpr auto& get_item(item_id_t id) {
-      assert(id && id <= next_id || !"Out of bounds");
+      assert((id && id <= next_id) || !"Out of bounds");
       return memory.at(id-1);
     }
 
@@ -171,7 +172,7 @@ namespace Constexpr {
       * @return auto& - Reference to the stored item slot.
       */
     constexpr auto& get_item(item_id_t id) const {
-      assert(id && id <= next_id || !"Out of bounds");
+      assert((id && id <= next_id) || !"Out of bounds");
       return memory.at(id-1);
     }
 
@@ -183,7 +184,7 @@ namespace Constexpr {
       */
     template <typename Item>
     constexpr auto& get_item(item_id_t id) {
-      assert(id && id <= next_id || !"Out of bounds");
+      assert((id && id <= next_id) || !"Out of bounds");
       return std::get<Item>(memory.at(id-1));
     }
 
@@ -195,7 +196,7 @@ namespace Constexpr {
       */
     template <typename Item>
     constexpr auto& get_item(item_id_t id) const {
-      assert(id && id <= next_id || !"Out of bounds");
+      assert((id && id <= next_id) || !"Out of bounds");
       return std::get<Item>(memory.at(id-1));
     }
 
@@ -208,7 +209,7 @@ namespace Constexpr {
       */
     template <typename Item>
     constexpr auto* get_item_if(item_id_t id) {
-      assert(id && id <= next_id || !"Out of bounds");
+      assert((id && id <= next_id) || !"Out of bounds");
       return std::get_if<Item>(&memory.at(id-1));
     }
 
@@ -221,7 +222,7 @@ namespace Constexpr {
       */
     template <typename Item>
     constexpr auto const* get_item_if(item_id_t id) const {
-      assert(id && id <= next_id || !"Out of bounds");
+      assert((id && id <= next_id) || !"Out of bounds");
       return std::get_if<Item>(&memory.at(id-1));
     }
 

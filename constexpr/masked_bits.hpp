@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include "type_traits.hpp"
 #include <limits>
+#include <cstdint>
 
 namespace Constexpr {
 /**
@@ -59,6 +60,20 @@ constexpr std::uint8_t count_bits_set(E value) {
     ++set_bit_count;
   }
   return set_bit_count;
+}
+
+/**
+ * @brief States if there is only one bit set.
+ * 
+ * @tparam E - Type of value being checked.
+ * @param value - value being checked.
+ * @return true if one bit set.
+ * @return false if more than one set or none set.
+ */
+template <typename E>
+constexpr bool has_only_one_bit_set(E value) {
+  auto const bits{ make_unsigned_equivalent(value) };
+  return !(!bits || (bits & (bits - 1u)) != 0u);
 }
 
 /**
