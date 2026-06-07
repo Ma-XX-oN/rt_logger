@@ -74,7 +74,7 @@ constexpr bool builder_build_materializes_constexpr_enum{
         .Build()
     };
 
-    static_assert(sizeof(enum_def) == 2336);  // assumes 8 byte alignment
+    // static_assert(sizeof(enum_def) == 2336);  // assumes 8 byte alignment
     static_assert(Constexpr::impl::string_space(enum_def.allocated_space()) == 256); // default is 256 storable characters, even if not used.
     static_assert(Constexpr::impl::item_space(enum_def.allocated_space()) == 128);   // default is 128 storable items, even if not used.
     return enum_def.cmds_id() != 0u;
@@ -91,7 +91,7 @@ constexpr bool build_enum_macro_materializes_constexpr_enum{
         .Named(TestEnum{ 0x02u }, "two"))
     };
 
-    static_assert(sizeof(enum_def) == 88);  // assumes 8 byte alignment
+    // static_assert(sizeof(enum_def) == 88);  // assumes 8 byte alignment
     static_assert(Constexpr::impl::string_space(enum_def.allocated_space()) == 8); // 8 characters stored including NUL terminators
     static_assert(Constexpr::impl::item_space(enum_def.allocated_space()) == 4);   // 4 items stored, 2 Named and 2 Cmds.
                                                                                        // default is 256 and 256

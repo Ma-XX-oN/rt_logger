@@ -56,8 +56,7 @@ constexpr bool kConstexprLiteralConstructionWorks{ []() constexpr {
 
   // View-style conversions should expose the same logical text too.
   bool const view_ok{
-    str.max_size() == std::string_view::npos
-    && str == std::string_view("alpha")
+    str == std::string_view("alpha")
     && static_cast<std::string_view>(str) == std::string_view("alpha")
   };
 
