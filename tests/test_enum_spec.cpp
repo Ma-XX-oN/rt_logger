@@ -153,6 +153,44 @@ constexpr bool build_enum_macro_decodes_constexpr_program{
 };
 static_assert(build_enum_macro_decodes_constexpr_program);
 
+// Prove that reserve_space() returns an EnumBuilderRoot with the requested settings.
+static_assert(std::is_same_v<
+  decltype(Constexpr::build_enum_description<TestSettings>().reserve_space<64, 16>()),
+  Constexpr::EnumBuilderRoot<Constexpr::EnumSettings<TestEnum, Constexpr::pack_space(64, 16)>>
+>);
+
+// Prove that the capacity configured by reserve_space() is reflected in the built enum.
+constexpr bool reserve_space_sets_allocated_capacity{
+  [] {
+    constexpr auto enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .reserve_space<64, 16>()
+        .Named(TestEnum{ 0x01u }, "one")
+        .Build()
+    };
+
+    static_assert(Constexpr::impl::string_space(enum_def.allocated_space()) == 64);
+    static_assert(Constexpr::impl::item_space(enum_def.allocated_space()) == 16);
+    return enum_def.cmds_id() != 0u;
+  }()
+};
+static_assert(reserve_space_sets_allocated_capacity);
+
+// Prove that decode_program() remains available after reserve_space().
+constexpr bool reserve_space_then_decode_program_materializes_constexpr_enum{
+  [] {
+    constexpr auto enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .reserve_space<128, 32>()
+        .decode_program(kDecodeProgramSv)
+        .Build()
+    };
+
+    return enum_def.cmds_id() != 0u;
+  }()
+};
+static_assert(reserve_space_then_decode_program_materializes_constexpr_enum);
+
 // Prove that the public Enum output API can size and encode one full stream during constant evaluation.
 constexpr bool enum_output_program_materializes_constexpr_stream{
   [] {
