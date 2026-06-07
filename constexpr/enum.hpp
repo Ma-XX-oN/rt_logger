@@ -37,110 +37,61 @@
 
 namespace Constexpr {
 
-enum eEnumCommand : std::uint8_t {
-  mOpCode            = 0b1110'0000, // Mask for opcode
-  mCountLarge        = 0b0001'1111, // Mask for count
-  mCountMedium       = 0b0000'1111, // Mask for count
-  mCountSmall        = 0b0000'0111, // Mask for count
+ // Using a Namespace-Enclosed Enum and then aliasing the enclosed enum with the wanted name makes
+ // accessing enum values require full qualification while still allowing implicit number
+ // conversion.
 
-  //                    Count size --v-- Holds number of items that follow and may be 0 or 1 based.
-  Terminate          = 0 << 5,  // | - | End of stream if stream length not known.
+namespace eEnumCommand_ns {
+  enum eEnumCommand : std::uint8_t {
+    mOpCode            = 0b1110'0000, // Mask for opcode
+    mCountLarge        = 0b0001'1111, // Mask for count
+    mCountMedium       = 0b0000'1111, // Mask for count
+    mCountSmall        = 0b0000'0111, // Mask for count
 
-  Named              = 1 << 5,  // | M | Specifies pairs; compares (value & current or stated bitmask) to enum_value.
-   fHasBitmask       =  1 << 4, // |   |   States if bitmask is specified.
+    //                    Count size --v-- Holds number of items that follow and may be 0 or 1 based.
+    Terminate          = 0 << 5,  // | - | End of stream if stream length not known.
 
-  Numeric            = 2 << 5,  // | - | Specifies name for bits for stated bitmask.
-   fRightShiftBits   =  1 << 0, // |   |   Shift bits so least significant bits coinciding with bitmask are at the 0th bit.
-   fPackedBits       =  1 << 1, // |   |   Condense bits coinciding with bitmask.
-   fIsSigned         =  1 << 2, // |   |   Sign extend bit coinciding with most significant bit of bitmask.
+    Named              = 1 << 5,  // | M | Specifies pairs; compares (value & current or stated bitmask) to enum_value.
+     fHasBitmask       =  1 << 4, // |   |   States if bitmask is specified.
 
-  GroupIf            = 3 << 5,  // | M | If group_bitmask set, use bitmask on following commands.
-  GroupIfNamed       = 4 << 5,  // | M | If group_bitmask set, use bitmask on following pairs.
-  Else               = 5 << 5,  // | S | Continue the current conditional scope as else group.
-   fHasGroupName     =  1 << 4, // |   | States if group name is specified for GroupIf* and Else.
-   fElseCmds         =  1 << 3, // |   | Used only by Else.  If set, Else is for commands otherwise pairs.
-  ContinueScope      = 6 << 5,  // | L | Continue the current named or command branch.
+    Numeric            = 2 << 5,  // | - | Specifies name for bits for stated bitmask.
+     fRightShiftBits   =  1 << 0, // |   |   Shift bits so least significant bits coinciding with bitmask are at the 0th bit.
+     fPackedBits       =  1 << 1, // |   |   Condense bits coinciding with bitmask.
+     fIsSigned         =  1 << 2, // |   |   Sign extend bit coinciding with most significant bit of bitmask.
 
-  GroupIfNumeric     = 7 << 5,  // | - | If group_bitmask set, specify numeric output for stated bitmask.
-   fNegate           =  1 << 3, // |   |   Inverts the inline numeric condition, so the numeric item belongs to the else case.
-   // GroupIfNumeric also can take fRightShiftBits, fPackedBits, fIsSigned and fHasGroupName flags.
-};
+    GroupIf            = 3 << 5,  // | M | If value's (1 << group_shift) bit is set, use bitmask on following commands.
+    GroupIfNamed       = 4 << 5,  // | M | If value's (1 << group_shift) bit is set, use bitmask on following pairs.
+    Else               = 5 << 5,  // | S | Continue the current conditional scope as else group.
+     fHasGroupName     =  1 << 4, // |   | States if group name is specified for GroupIf* and Else.
+     fElseCmds         =  1 << 3, // |   | Used only by Else.  If set, Else is for commands otherwise pairs.
+    ContinueScope      = 6 << 5,  // | L | Continue the current named or command branch.
 
+    GroupIfNumeric     = 7 << 5,  // | - | If value's (1 << group_shift) bit is set, specify numeric output for stated bitmask.
+     fNegate           =  1 << 3, // |   |   Inverts the inline numeric condition, so the numeric item belongs to the else case.
+    // GroupIfNumeric also can take fRightShiftBits, fPackedBits, fIsSigned and fHasGroupName flags.
+  };
+}
+/**
+ * @brief Enum command opcodes
+ */
+using eEnumCommand = eEnumCommand_ns::eEnumCommand;
+
+namespace eEnumStorageType_ns {
+  enum eEnumStorageType : std::uint8_t {
+    fIsSigned= 0x04, // Bit states if type is signed
+    UInt8    = 0x00, UInt16   = 0x01, UInt32   = 0x02, UInt64   = 0x03,
+     Int8    = 0x04,  Int16   = 0x05,  Int32   = 0x06,  Int64   = 0x07,
+
+    // States how constrained group_bitmask, bitmask and enum_value values are stored
+    Compress = 0x08, // Encode constrained values as condensed dints under the parent scope
+  };
+}
 /**
  * @brief Describes the stored underlying type and constrained-value encoding
  *   mode for one definition stream.
  */
-enum eEnumStorageType : std::uint8_t {
-  Int8     = 0x00,
-  Int16    = 0x01,
-  Int32    = 0x02,
-  Int64    = 0x03,
-  UInt8    = 0x04,
-  UInt16   = 0x05,
-  UInt32   = 0x06,
-  UInt64   = 0x07,
-  Compress = 0x08,
-};
+using eEnumStorageType = eEnumStorageType_ns::eEnumStorageType;
 
-/**
- * @brief Base parse error for malformed enum definition streams.
- */
-class EnumParseError : public std::runtime_error {
-public:
-  using std::runtime_error::runtime_error;
-};
-
-/**
- * @brief Reports that no header byte was available to start decoding.
- */
-class EnumParseEmptyInput : public EnumParseError {
-public:
-  using EnumParseError::EnumParseError;
-};
-
-/**
- * @brief Reports that the decoded storage-type header does not match the
- *   requested enum value type.
- */
-class EnumParseHeaderMismatch : public EnumParseError {
-public:
-  using EnumParseError::EnumParseError;
-};
-
-/**
- * @brief Reports that the stream ended before the current item could be fully
- *   decoded.
- */
-class EnumParseUnexpectedEof : public EnumParseError {
-public:
-  using EnumParseError::EnumParseError;
-};
-
-/**
- * @brief Reports that an opcode byte or inline flag combination is invalid.
- */
-class EnumParseInvalidOpcode : public EnumParseError {
-public:
-  using EnumParseError::EnumParseError;
-};
-
-/**
- * @brief Reports that the stream violates one of the enum grammar or graph
- *   invariants.
- */
-class EnumParseInvalidStructure : public EnumParseError {
-public:
-  using EnumParseError::EnumParseError;
-};
-
-/**
- * @brief Reports that the decoded payload exceeds the destination enum's fixed
- *   string or item capacity.
- */
-class EnumParseCapacityExceeded : public EnumParseError {
-public:
-  using EnumParseError::EnumParseError;
-};
 } // namespace Constexpr
 
 template <>
@@ -148,8 +99,6 @@ struct BitwiseOps<Constexpr::eEnumCommand> : std::true_type {};
 
 template <>
 struct BitwiseOps<Constexpr::eEnumStorageType> : std::true_type {};
-
-
 
 // What we need:
 //
@@ -258,6 +207,65 @@ struct BitwiseOps<Constexpr::eEnumStorageType> : std::true_type {};
 // using E = std::int8_t;
 
 namespace Constexpr {
+  /**
+  * @brief Base parse error for malformed enum definition streams.
+  */
+  class EnumParseError : public std::runtime_error {
+  public:
+    using std::runtime_error::runtime_error;
+  };
+
+  /**
+  * @brief Reports that no header byte was available to start decoding.
+  */
+  class EnumParseEmptyInput : public EnumParseError {
+  public:
+    using EnumParseError::EnumParseError;
+  };
+
+  /**
+  * @brief Reports that the decoded storage-type header does not match the
+  *   requested enum value type.
+  */
+  class EnumParseHeaderMismatch : public EnumParseError {
+  public:
+    using EnumParseError::EnumParseError;
+  };
+
+  /**
+  * @brief Reports that the stream ended before the current item could be fully
+  *   decoded.
+  */
+  class EnumParseUnexpectedEof : public EnumParseError {
+  public:
+    using EnumParseError::EnumParseError;
+  };
+
+  /**
+  * @brief Reports that an opcode byte or inline flag combination is invalid.
+  */
+  class EnumParseInvalidOpcode : public EnumParseError {
+  public:
+    using EnumParseError::EnumParseError;
+  };
+
+  /**
+  * @brief Reports that the stream violates one of the enum grammar or graph
+  *   invariants.
+  */
+  class EnumParseInvalidStructure : public EnumParseError {
+  public:
+    using EnumParseError::EnumParseError;
+  };
+
+  /**
+  * @brief Reports that the decoded payload exceeds the destination enum's fixed
+  *   string or item capacity.
+  */
+  class EnumParseCapacityExceeded : public EnumParseError {
+  public:
+    using EnumParseError::EnumParseError;
+  };
 
   template <typename EnumT>
   class EnumValueView;
@@ -465,7 +473,6 @@ namespace Constexpr {
         program.resize(size());
       }
 
-    private:
       /**
        * @brief Appends one raw byte.
        *
@@ -543,6 +550,15 @@ namespace Constexpr {
        * @param cmd - Ignored opcode value.
        */
       constexpr void write_opcode([[maybe_unused]] eEnumCommand cmd) noexcept {
+        ++m_size;
+      }
+
+      /**
+       * @brief Accounts for one opcode byte.
+       *
+       * @param byte - Ignored opcode value.
+       */
+      constexpr void write_byte([[maybe_unused]] std::uint8_t byte) noexcept {
         ++m_size;
       }
 
@@ -999,6 +1015,15 @@ namespace Constexpr {
       }
 
       /**
+       * @brief Encodes one byte.
+       *
+       * @param byte - Byte to encode.
+       */
+      constexpr void encode_byte(std::uint8_t byte) {
+        m_writer->write_byte(byte);
+      }
+
+      /**
        * @brief Retrieves an unresolved stored item variant by id.
        *
        * @param item_id - Item id to look up.
@@ -1298,7 +1323,8 @@ namespace Constexpr {
 
         // EMITTING IF AND MASKS
         auto const if_pc{ ec.reserve_byte() };
-        ec.encode_int(group_bitmask, ec.scope_bitmask());
+        ec.encode_byte(least_set_bit_index(group_bitmask));
+        assert(count_bits_set(group_bitmask) == 1 || !"group_bitmask must only set one bit.");
         ec.encode_int(bitmask, ec.scope_bitmask());
         if (if_group && if_group->name_id) {
           ec.encode_string(if_group->name_id);
@@ -1838,7 +1864,7 @@ namespace Constexpr {
        *
        * @param value - Enum value matched by the pair.
        * @param name - Display name for the pair.
-       * @return auto - Updated command scope.
+       * @return Derived& - Updated command scope.
        */
       template <typename D = Derived>
       constexpr Derived& Named(typename D::value_type value, std::string_view name) {
@@ -3163,6 +3189,25 @@ namespace Constexpr {
       }
 
       /**
+       * @brief Reads in the scoped group_shift and return the corresponding bitmask.
+       *
+       * @param scope_bitmask - Parent scope bitmask that constrains the value.
+       * @return value_type - Decoded constrained value.
+       */
+      constexpr value_type read_scoped_group_mask_value(value_type scope_bitmask) {
+        auto const group_shift{ read_fixed_width_integer<std::uint8_t>() };
+        if (group_shift >= std::numeric_limits<unsigned_value_type>::digits) {
+          throw EnumParseInvalidStructure("group_shift value exceeds number of bits in value_type.");
+        }
+        value_type const group_mask{ static_cast<value_type>(1 << group_shift) };
+        auto const recon{ scope_bitmask & group_mask };
+        if (recon != group_mask) {
+          throw EnumParseInvalidStructure("Bit value is not representable under the parent scope bitmask.");
+        }
+        return group_mask;
+      }
+
+      /**
        * @brief Reads one constrained value using the stream's compression mode.
        *
        * @param scope_bitmask - Parent scope bitmask that constrains the value.
@@ -3510,7 +3555,7 @@ namespace Constexpr {
           static_cast<eEnumCommand>(opcode & static_cast<std::uint8_t>(eEnumCommand::mOpCode))
         };
 
-        value_type const group_bitmask{ read_scoped_value(scope_bitmask) };
+        value_type const group_bitmask{ read_scoped_group_mask_value(scope_bitmask) };
         verify_group_bitmask(group_bitmask);
         value_type const branch_scope_bitmask{ read_scoped_value(scope_bitmask) };
         string_id_t const group_name_id{
@@ -3949,7 +3994,7 @@ namespace Constexpr {
     using value_view_type = AnyEnumValueView<AnyEnumDescription<StringAndItemCapacity>>;
 
     eEnumStorageType m_storage_type{};
-    variant_type m_enum;
+    variant_type m_enum_desc;
 
   public:
     /**
@@ -3959,12 +4004,12 @@ namespace Constexpr {
      * @tparam EnumT - Active typed enum alternative.
      * @param storage_type - Underlying width/sign discriminator chosen from the
      *   program header.
-     * @param enum_def - Decoded typed enum description.
+     * @param enum_desc - Decoded typed enum description.
      */
     template <typename EnumT>
-    constexpr AnyEnumDescription(eEnumStorageType storage_type, EnumT enum_def)
+    constexpr AnyEnumDescription(eEnumStorageType storage_type, EnumT enum_desc)
     : m_storage_type{ storage_type }
-    , m_enum{ enum_def }
+    , m_enum_desc{ enum_desc }
     {
     }
 
@@ -3984,24 +4029,7 @@ namespace Constexpr {
      * @return bool - \c true when the active by-wire value type is signed.
      */
     constexpr bool is_signed() const noexcept {
-      switch (storage_type()) {
-        case eEnumStorageType::Int8:
-        case eEnumStorageType::Int16:
-        case eEnumStorageType::Int32:
-        case eEnumStorageType::Int64:
-          return true;
-        case eEnumStorageType::UInt8:
-        case eEnumStorageType::UInt16:
-        case eEnumStorageType::UInt32:
-        case eEnumStorageType::UInt64:
-          return false;
-        case eEnumStorageType::Compress:
-          assert(false && "Impossible: AnyEnumDescription stores only the base storage discriminator.");
-          return false;
-      }
-
-      assert(false && "AnyEnumDescription must store a valid base storage discriminator.");
-      return false;
+      return (storage_type() & eEnumStorageType::fIsSigned);
     }
 
     /**
@@ -4013,7 +4041,7 @@ namespace Constexpr {
      */
     template <class Visitor>
     decltype(auto) visit(Visitor&& visitor) const {
-      return std::visit(std::forward<Visitor>(visitor), m_enum);
+      return std::visit(std::forward<Visitor>(visitor), m_enum_desc);
     }
 
     /**
@@ -4091,8 +4119,8 @@ namespace Constexpr {
       bool compress = false,
       bool append_terminate = false) const
     {
-      return visit([&](auto const& enum_def) {
-        return enum_def.program_size(compress, append_terminate);
+      return visit([&](auto const& enum_desc) {
+        return enum_desc.program_size(compress, append_terminate);
       });
     }
 
@@ -4112,8 +4140,8 @@ namespace Constexpr {
       bool compress = false,
       bool append_terminate = false) const
     {
-      return visit([&](auto const& enum_def) {
-        return enum_def.output_program(begin, end, compress, append_terminate);
+      return visit([&](auto const& enum_desc) {
+        return enum_desc.output_program(begin, end, compress, append_terminate);
       });
     }
 
@@ -4129,8 +4157,8 @@ namespace Constexpr {
       bool compress = false,
       bool append_terminate = false) const
     {
-      return visit([&](auto const& enum_def) {
-        return enum_def.output_program(compress, append_terminate);
+      return visit([&](auto const& enum_desc) {
+        return enum_desc.output_program(compress, append_terminate);
       });
     }
 
@@ -4147,8 +4175,8 @@ namespace Constexpr {
       bool compress = false,
       bool append_terminate = false) const
     {
-      return visit([&](auto const& enum_def) -> std::ostream& {
-        return enum_def.output_program(os, compress, append_terminate);
+      return visit([&](auto const& enum_desc) -> std::ostream& {
+        return enum_desc.output_program(os, compress, append_terminate);
       });
     }
   };

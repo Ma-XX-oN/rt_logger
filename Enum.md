@@ -8,7 +8,6 @@
   - [Parent-Typed Nesting](#parent-typed-nesting)
   - [Future Enhancements](#future-enhancements)
     - [Output Format](#output-format)
-    - [Encoding Format](#encoding-format)
     - [Runtime Type Selection](#runtime-type-selection)
 - [Usage Examples](#usage-examples)
   - [Naming Convention Used In These Examples](#naming-convention-used-in-these-examples)
@@ -27,7 +26,9 @@
 
 ## Purpose
 
-This document is the authoritative design note for the enum-description subsystem.
+This document is the authoritative design note for the enum-description subsystem, which allows keeping an integer or
+enum as that but allows it to be described in human readable form and transporting that description to other processes
+that don't have that type compiled in.
 
 It records:
 
@@ -42,30 +43,30 @@ It records:
 
 ```c++
 enum eEnumStorageType : std::uint8_t {
-  // Integer types
-   Int8 = 0x00,  Int16 = 0x01,  Int32 = 0x02,  Int64 = 0x03,
-  UInt8 = 0x04, UInt16 = 0x05, UInt32 = 0x06, UInt64 = 0x07,
+  fIsSigned= 0x04, // Bit states if type is signed
+  UInt8    = 0x00, UInt16   = 0x01, UInt32   = 0x02, UInt64   = 0x03,
+   Int8    = 0x04,  Int16   = 0x05,  Int32   = 0x06,  Int64   = 0x07,
 
   // States how constrained group_bitmask, bitmask and enum_value values are stored
-  Compress          = 0x08, // Encode constrained values as condensed dints under the parent scope
+  Compress = 0x08, // Encode constrained values as condensed dints under the parent scope
 };
 ```
 
 An enum definition stream uses this storage type and a compact descriptor program to describe how enum values are named,
 grouped, and formatted.
 
-The minimum valid program is exactly one byte: the storage-type header. After that header, the program body may be
-empty. The stream is processed sequentially. If the stream length is known externally, decoding may stop at the end of
-the stream. Otherwise the stream may use `Terminate` as an explicit end marker when the caller chooses to allow it.
+The minimum valid program is exactly one byte: the storage-type header. After that header, the program body consists of
+0 or more bytes. The stream is processed sequentially. If the stream length is known externally, decoding will stop at
+the end of the stream. Otherwise the stream may use `Terminate` as an explicit end marker when the caller chooses to
+allow it.
 
-This format makes scope explicit in each `GroupIf*` command. The block's `bitmask` replaces the earlier idea of a
-separate `SetMaskValue` command, so the scope used by a conditional block is visible at the block header instead of
-being ambient mutable state.
+In each `GroupIf*`, `Numeric` and `Named` command, the block's `bitmask` (if provided) limits the bits seen by that
+command and must be a subset of the previous `bitmask`.  When the command ends, the previous `bitmask` is restored.  The
+top level `bitmask` is all of the bits set.
 
-`Compress` changes only how constrained values are encoded, not the semantics below. If `Compress` is clear, constrained
-`group_bitmask`, `bitmask`, and `enum_value` values are stored full width. If `Compress` is set, those same values are
-stored as condensed dints relative to the parent `scope_bitmask` and are decoded back before the execution rules
-below are applied.
+`Compress` changes only how `bitmask` and `enum_value` are encoded. If `Compress` is clear, they are stored full width.
+If `Compress` is set, those same values are stored as condensed dints relative to the parent `scope_bitmask` and are
+decoded back before the execution rules below are applied.
 
 The command set is:
 
@@ -87,14 +88,14 @@ enum eEnumCommand : std::uint8_t {
    fPackedBits       =  1 << 1, // |   |   Condense bits coinciding with bitmask.
    fIsSigned         =  1 << 2, // |   |   Sign extend bit coinciding with most significant bit of bitmask.
 
-  GroupIf            = 3 << 5,  // | M | If group_bitmask set, use bitmask on following commands.
-  GroupIfNamed       = 4 << 5,  // | M | If group_bitmask set, use bitmask on following pairs.
+  GroupIf            = 3 << 5,  // | M | If value's (1 << group_shift) bit is set, use bitmask on following commands.
+  GroupIfNamed       = 4 << 5,  // | M | If value's (1 << group_shift) bit is set, use bitmask on following pairs.
   Else               = 5 << 5,  // | S | Continue the current conditional scope as else group.
    fHasGroupName     =  1 << 4, // |   | States if group name is specified for GroupIf* and Else.
    fElseCmds         =  1 << 3, // |   | Used only by Else.  If set, Else is for commands otherwise pairs.
   ContinueScope      = 6 << 5,  // | L | Continue the current named or command branch.
 
-  GroupIfNumeric     = 7 << 5,  // | - | If group_bitmask set, specify numeric output for stated bitmask.
+  GroupIfNumeric     = 7 << 5,  // | - | If value's (1 << group_shift) bit is set, specify numeric output for stated bitmask.
    fNegate           =  1 << 3, // |   |   Inverts the inline numeric condition, so the numeric item belongs to the else case.
    // GroupIfNumeric also can take fRightShiftBits, fPackedBits, fIsSigned and fHasGroupName flags.
 };
@@ -102,12 +103,12 @@ enum eEnumCommand : std::uint8_t {
 
 ## API Direction
 
-The accepted API direction for enum descriptions is:
+The API for enum descriptions is:
 
 - `Constexpr::Enum<Settings>` is the public immutable representation type.
 - compile-time and runtime description building starts from:
-  - `build_enum_description<Settings>()`
-  - `BUILD_ENUM_DESCRIPTION(EnumType, ...)` when the default two-pass shrink-to-fit macro is desired
+  - `build_enum_description<Settings>()` is a function that allows writing the description in a function chained manner.
+  - `BUILD_ENUM_DESCRIPTION(EnumType, ...)` is a macro that reduces the size of the description, by not allocating extra unused space.
 - runtime and constexpr stream decoding is exposed through the builder chain:
   - `build_enum_description<Settings>().decode_program(program_sv, throw_on_terminate).Build()`
   - `build_any_enum_description<StringAndItemCapacity>().decode_program(program_sv, throw_on_terminate).Build()`
@@ -118,10 +119,6 @@ The accepted API direction for enum descriptions is:
   - `output_program(compress, append_terminate)` returning `std::string`
 - `string_id_t` and `item_id_t` are public storage ids in `Constexpr`, defined with the storage layer rather than inside
   enum-encoding internals.
-- `ProgramWriter` and `EnumEncoder` remain internal low-level helpers. Most callers should use the `Enum` output
-  functions instead of driving the writer and encoder manually.
-- Stored enum items continue to own their `encode(...)` member functions. Scope-introducing block logic remains in a
-  free helper instead of being spread across ad-hoc policy objects.
 
 ### Builder Shape
 
@@ -136,7 +133,7 @@ Reasons:
 
 ### Builder States
 
-The accepted builder-state model is:
+The builder-state model is:
 
 - `GlobalScope`
   - allows `If`, `IfNot`, `Named`, and `Numeric`
@@ -164,7 +161,7 @@ So the intended shape is closer to `IfScope<Parent>` and `ElseScope<Parent>` tha
 
 #### Output Format
 
-One accepted future enhancement is richer numeric output formatting without widening the common `Numeric` command form.
+One future enhancement is richer numeric output formatting without widening the common `Numeric` command form.
 
 For plain `Numeric`, the remaining two format bits may be used as a compact numeric display mode:
 
@@ -175,15 +172,12 @@ For plain `Numeric`, the remaining two format bits may be used as a compact nume
 
 `GroupIfNumeric` stays the restricted compact inline form for simple decimal numeric output only.
 
-If a conditional numeric branch needs any non-default numeric presentation, it should not use `GroupIfNumeric`. It
-should encode as `GroupIf` with a normal `Numeric` command inside the branch instead.
-
-#### Encoding Format
-
-Since a group mask shall only be one bit, instead of encoding the bitmask as the underlying type or dint-condensed
-underlying type, we can replace that with an unsigned char to signify which bit is set.
+If a conditional numeric branch needs any non-default numeric presentation, it should encode as `GroupIf` with a normal
+`Numeric` command inside the branch.
 
 #### Runtime Type Selection
+
+TODO: Add examples in into [Usage Examples](#usage-examples)
 
 The by-wire program already carries the underlying width and signedness in its one-byte storage header. The missing
 piece is a variant-backed runtime-selected decoded holder for receivers that do not know the enum value type at
@@ -266,6 +260,10 @@ enum class ePacketState : std::uint8_t {
   fPrimary = 0x80,
   mKindMask = 0x0F,
 };
+
+// enable bitwise operators
+template<>
+struct BitwiseOps<ePacketState> : std::true_type {};
 
 auto PacketDesc = Constexpr::build_enum_description<Constexpr::EnumSettings<ePacketState>>()
   .If(ePacketState::fPrimary, ePacketState::mKindMask, "primary")
@@ -425,10 +423,12 @@ Using the `PacketDesc` example from
 
 ```cpp
 // Not implemented today.
-auto value = PacketDesc.value(ePacketState{ 0x01 });
+auto value = PacketDesc.value(ePacketState::fPrimary | ePacketState{ 0x01 });
 
-value = PacketDesc.set("HELLO");               // ok if already in the secondary group
-value = PacketDesc.set("primary", "ONE");      // explicit group switch
+value = PacketDesc.set("HELLO");               // ok if already in the secondary group, asserts or exception if not
+value = PacketDesc.set("primary");             // explicit group switch
+value = PacketDesc.set("primary", "ONE");      // explicit group switch and setting value
+value = PacketDesc.set("primary", "HELLO");    // Compile error since HELLO doesn't belong to primary
 value = PacketDesc.force_set("GOODBYE");       // explicit unchecked switch
 ```
 
@@ -438,14 +438,14 @@ An enum definition stream consists of one command following another.
 
 The basic data items are:
 
-| item            | meaning                                     | type                                                            |
-|-----------------|---------------------------------------------|-----------------------------------------------------------------|
-| `bitmask`       | constrains comparisons or numeric output    | integer size of type or dint if compressed                      |
-| `group_bitmask` | single selector bit for a conditional group | integer size of type or dint if compressed                      |
-| `enum_value`    | masked enum value to compare against        | integer size of type or dint if compressed                      |
-| `name`          | emitted name or numeric field label         | c-string                                                        |
-| `gName`         | group name label                            | c-string                                                        |
-| `pair`          | (`enum_value`, `name`)                      | integer size of type or dint if compressed followed by c-string |
+| item            | meaning                                     | type                                                               |
+|-----------------|---------------------------------------------|--------------------------------------------------------------------|
+| `bitmask`       | constrains comparisons or numeric output    | integer size of type or dint if compressed                         |
+| `group_shift`   | value to left shift 1 to get `group_mask`   | unsigned char representing left shifts to 1 to get `group_bitmask` |
+| `enum_value`    | masked enum value to compare against        | integer size of type or dint if compressed                         |
+| `name`          | emitted name or numeric field label         | c-string                                                           |
+| `gName`         | group name label                            | c-string                                                           |
+| `pair`          | (`enum_value`, `name`)                      | integer size of type or dint if compressed followed by c-string    |
 
 The commands are:
 
@@ -454,9 +454,9 @@ The commands are:
 | `Terminate`      | `Unused`                                                                        | none                                                 | Ends stream processing. Required when the stream length is not known externally.                                                                                                                                                                                                                                                |
 | `Named`          | `PairCount` and optional `Has_bitmask`                                          | `pair`, ... or `bitmask`, `pair`, ...                | Uses the effective bitmask for that command, compares the current value against each `enum_value`, and emits the matching `name`.                                                                                                                                                                                               |
 | `Numeric`        | `Format`                                                                        | `bitmask`, `name`                                    | Emits a numeric representation of `value & bitmask` using the selected format.                                                                                                                                                                                                                                                  |
-| `GroupIf`        | `If_CmdCount`  and optional `Has_GroupName`                                     | `group_bitmask`, `bitmask`, `*gName`, `command`, ... | If `(value & group_bitmask) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands. If `Has_GroupName` set, then `*gName` is specified, otherwise not.                                                                                                                                        |
-| `GroupIfNamed`   | `If_PairCount` and optional `Has_GroupName`                                     | `group_bitmask`, `bitmask`, `*gName`, `pair`, ...    | Conditional `Named` block in a nested scope. If `Has_GroupName` set, then `*gName` is specified, otherwise not.                                                                                                                                                                                                                 |
-| `GroupIfNumeric` | `Format` and optional `Negate` and `Has_GroupName`                              | `group_bitmask`, `bitmask`, `*gName`, `name`         | Conditional `Numeric` block in a nested scope. `Negate` makes the inline numeric output belong to the `else` case instead of the `if` case. A following `Else` is allowed.  If `Has_GroupName` set, then `*gName` is specified, otherwise not.                                                                                  |
+| `GroupIf`        | `If_CmdCount`  and optional `Has_GroupName`                                     | `group_shift`, `bitmask`, `*gName`, `command`, ...   | If `(value & (1 << group_shift)) != 0`, enters a nested scope with the given `bitmask` and executes the enclosed commands. If `Has_GroupName` set, then `*gName` is specified, otherwise not.                                                                                                                                   |
+| `GroupIfNamed`   | `If_PairCount` and optional `Has_GroupName`                                     | `group_shift`, `bitmask`, `*gName`, `pair`, ...      | Same as `GroupIf`, but encloses an implicit `Named` block in a nested scope.                                                                                                                                                                                                                                                    |
+| `GroupIfNumeric` | `Format` and optional `Negate` and `Has_GroupName`                              | `group_shift`, `bitmask`, `*gName`, `name`           | Same as `GroupIf`, but encloses an implicit `Numeric` block in a nested scope. `Negate` makes the inline numeric output belong to the `else` case instead of the `if` case. A following `Else` is allowed.                                                                                                                      |
 | `Else`           | `Else_PairCount` or `Else_CmdCount` and optional `Has_GroupName` and `ElseCmds` | `*gName`, `pair`, ... or `*gName`, `command`, ...    | Alternate branch for the immediately preceding `GroupIf`, `GroupIfNamed`, or `GroupIfNumeric` block. The `Else` branch uses the same block scope `bitmask` as the corresponding `if` branch. If `Has_GroupName` set, then `*gName` is specified, otherwise not.  If `ElseCmds` set, then uses `command`, ... otherwise `pairs`. |
 | `ContinueScope`  | `Cont_PairCount` or `Cont_CmdCount`                                             | `pair`, ... or `command`, ...                        | Extends the immediately preceding branch when more pairs or commands are needed than fit in the originating count field.                                                                                                                                                                                                        |
 
@@ -493,12 +493,14 @@ Execution rules:
    `Named` compares real masked enum values. Values are not shifted before comparing: `(value & effective_bitmask) ==
    enum_value`.
 3. `Numeric` formats `value & bitmask`. `Format` controls how the masked bits are interpreted.
-4. `group_bitmask` must contain exactly one bit. It selects which branch of a conditional group is used.
+4. `group_shift` shifts 1 left that many bits to get `group_bitmask`. It selects which branch of a conditional group is
+   used.
 5. Entering `GroupIf`, `GroupIfNamed`, or `GroupIfNumeric` evaluates whether `(value & group_bitmask) != 0`.
 6. Each `GroupIf*` command introduces a new scope bitmask. On entry, the current scope bitmask is pushed and replaced
    with the block's `bitmask`. On exit, the previous scope bitmask is restored.
 7. `group_bitmask`, `bitmask`, and `enum_value` are all constrained by the parent `scope_bitmask` and must be subsets of
-   it. This allows `Compress` to encode them in condensed form. A stream that violates these constraints is invalid.
+   it. This allows `Compress` to encode `bitmask` and `enum_value` in condensed form and verify `group_bitmask`. A
+   stream that violates these constraints is invalid.
 8. The matching `Else` branch reuses the same scope bitmask as the corresponding conditional branch.
 9. `ContinueScope` continues the current branch at the same nesting level and with the same scope bitmask. It does not
    introduce a new condition.

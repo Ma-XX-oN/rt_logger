@@ -49,8 +49,8 @@ constexpr std::uint8_t storage_header_for(bool compress = false) {
 }
 
 constexpr char kDecodeProgram[]{
-  static_cast<char>(0x04u),
-  static_cast<char>(static_cast<unsigned char>(eEnumCommand::Named) | 0x01u),
+  static_cast<char>(storage_header_for<std::uint8_t>()),
+  static_cast<char>(static_cast<std::uint8_t>(eEnumCommand::Named) | 0x01u), // Named with 2 elements
   static_cast<char>(0x01u), 'o', 'n', 'e', '\0',
   static_cast<char>(0x02u), 't', 'w', 'o', '\0',
 };
@@ -282,6 +282,21 @@ void write_scoped_value(
     return;
   }
 
+  writer.write_int(Constexpr::make_underlying_equivalent(value));
+}
+
+/**
+ * @brief Writes one constrained integer bit as a bit offset count for manual decoder tests.
+ *
+ * @tparam ValueT - Enum or integral value type.
+ * @param writer - Destination program writer.
+ * @param value - Constrained value to encode.
+ */
+template <typename ValueT>
+void write_group_shift(
+  Constexpr::impl::ProgramWriter& writer,
+  ValueT value)
+{
   writer.write_int(Constexpr::make_underlying_equivalent(value));
 }
 
@@ -538,17 +553,17 @@ TEST(EnumSpecWriter, AllowsPatchThroughCursorByteReference)
   writer.write_opcode(eEnumCommand::Terminate);
 
   writer.byte_at(opcode_cursor) = static_cast<char>(
-    static_cast<unsigned char>(writer.byte_at(opcode_cursor)) | 0x03u);
+    static_cast<std::uint8_t>(writer.byte_at(opcode_cursor)) | 0x03u);
   writer.byte_at(opcode_cursor) = static_cast<char>(
-    (static_cast<unsigned char>(writer.byte_at(opcode_cursor))
-      & static_cast<unsigned char>(~static_cast<unsigned char>(eEnumCommand::mOpCode)))
-    | static_cast<unsigned char>(eEnumCommand::Named));
+    (static_cast<std::uint8_t>(writer.byte_at(opcode_cursor))
+      & static_cast<std::uint8_t>(~static_cast<std::uint8_t>(eEnumCommand::mOpCode)))
+    | static_cast<std::uint8_t>(eEnumCommand::Named));
 
   writer.finish(program);
 
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Named) | 0x03u));
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::Named) | 0x03u));
 }
 
 TEST(EnumSpecEncoding, PublicOutputProgramOverloadsEmitConsistentHeaderedStreams)
@@ -597,8 +612,8 @@ TEST(EnumSpecEncoding, CopiesChildScopeWithoutMutatingParentState)
   EXPECT_EQ(encoder.scope_bitmask(), 0xFFu);
   EXPECT_EQ(encoder.remaining_items_allowed_in_block(), 7);
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(eEnumCommand::Named | eEnumCommand::fHasBitmask));
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(eEnumCommand::Named | eEnumCommand::fHasBitmask));
 }
 
 TEST(EnumSpecEncoding, EmitsContinueScopeWhenNamedPairsOverflowBlockBudget)
@@ -617,12 +632,14 @@ TEST(EnumSpecEncoding, EmitsContinueScopeWhenNamedPairsOverflowBlockBudget)
 
   EXPECT_EQ(program.size(), 53u);
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Named) | 0x0Fu));
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::Named) | 0x0Fu));
   EXPECT_EQ(
-    static_cast<unsigned char>(program[49]),
-    static_cast<unsigned char>(eEnumCommand::ContinueScope));
+    static_cast<std::uint8_t>(program[49]),
+    static_cast<std::uint8_t>(eEnumCommand::ContinueScope));
 }
+
+constexpr std::uint8_t fGroup7thBitSet { 7 };
 
 TEST(EnumSpecEncoding, ConditionalEmitsNamedIfAndPairElseBranches)
 {
@@ -653,17 +670,17 @@ TEST(EnumSpecEncoding, ConditionalEmitsNamedIfAndPairElseBranches)
 
   ASSERT_EQ(program.size(), 18u);
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::GroupIfNamed)
-      | static_cast<unsigned char>(eEnumCommand::fHasGroupName)
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::GroupIfNamed)
+      | static_cast<std::uint8_t>(eEnumCommand::fHasGroupName)
       | 0x01u));
-  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
-  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[1]), fGroup7thBitSet);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[2]), 0x0Fu);
   EXPECT_EQ(std::string_view{ program.data() + 3u }, "ifg");
-  EXPECT_EQ(static_cast<unsigned char>(program[7]), 0x01u);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[7]), 0x01u);
   EXPECT_EQ(std::string_view{ program.data() + 8u }, "one");
-  EXPECT_EQ(static_cast<unsigned char>(program[12]), static_cast<unsigned char>(eEnumCommand::Else));
-  EXPECT_EQ(static_cast<unsigned char>(program[13]), 0x02u);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[12]), static_cast<std::uint8_t>(eEnumCommand::Else));
+  EXPECT_EQ(static_cast<std::uint8_t>(program[13]), 0x02u);
   EXPECT_EQ(std::string_view{ program.data() + 14u }, "two");
 }
 
@@ -695,22 +712,22 @@ TEST(EnumSpecEncoding, ConditionalEmitsNumericIfAndCommandElseBranches)
 
   ASSERT_EQ(program.size(), 21u);
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(eEnumCommand::GroupIfNumeric));
-  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
-  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(eEnumCommand::GroupIfNumeric));
+  EXPECT_EQ(static_cast<std::uint8_t>(program[1]), fGroup7thBitSet);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[2]), 0x0Fu);
   EXPECT_EQ(std::string_view{ program.data() + 3u }, "bits");
   EXPECT_EQ(
-    static_cast<unsigned char>(program[8]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Else)
-      | static_cast<unsigned char>(eEnumCommand::fHasGroupName)
-      | static_cast<unsigned char>(eEnumCommand::fElseCmds)));
+    static_cast<std::uint8_t>(program[8]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::Else)
+      | static_cast<std::uint8_t>(eEnumCommand::fHasGroupName)
+      | static_cast<std::uint8_t>(eEnumCommand::fElseCmds)));
   EXPECT_EQ(std::string_view{ program.data() + 9u }, "else");
   EXPECT_EQ(
-    static_cast<unsigned char>(program[14]),
-    static_cast<unsigned char>(eEnumCommand::Named | eEnumCommand::fHasBitmask));
-  EXPECT_EQ(static_cast<unsigned char>(program[15]), 0x03u);
-  EXPECT_EQ(static_cast<unsigned char>(program[16]), 0x02u);
+    static_cast<std::uint8_t>(program[14]),
+    static_cast<std::uint8_t>(eEnumCommand::Named | eEnumCommand::fHasBitmask));
+  EXPECT_EQ(static_cast<std::uint8_t>(program[15]), 0x03u);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[16]), 0x02u);
   EXPECT_EQ(std::string_view{ program.data() + 17u }, "two");
 }
 
@@ -741,18 +758,18 @@ TEST(EnumSpecEncoding, ConditionalEmitsNegatedNumericWhenOnlyFalseBranchInlines)
 
   ASSERT_EQ(program.size(), 18u);
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::GroupIfNumeric)
-      | static_cast<unsigned char>(eEnumCommand::fNegate)));
-  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
-  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::GroupIfNumeric)
+      | static_cast<std::uint8_t>(eEnumCommand::fNegate)));
+  EXPECT_EQ(static_cast<std::uint8_t>(program[1]), fGroup7thBitSet);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[2]), 0x0Fu);
   EXPECT_EQ(std::string_view{ program.data() + 3u }, "bits");
   EXPECT_EQ(
-    static_cast<unsigned char>(program[8]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Else)
-      | static_cast<unsigned char>(eEnumCommand::fHasGroupName)));
+    static_cast<std::uint8_t>(program[8]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::Else)
+      | static_cast<std::uint8_t>(eEnumCommand::fHasGroupName)));
   EXPECT_EQ(std::string_view{ program.data() + 9u }, "ifg");
-  EXPECT_EQ(static_cast<unsigned char>(program[13]), 0x01u);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[13]), 0x01u);
   EXPECT_EQ(std::string_view{ program.data() + 14u }, "one");
 }
 
@@ -779,12 +796,12 @@ TEST(EnumSpecEncoding, ConditionalAllowsOnlyFalseBranchWithoutMaterializingATrue
 
   ASSERT_EQ(program.size(), 9u);
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(eEnumCommand::GroupIf));
-  EXPECT_EQ(static_cast<unsigned char>(program[1]), 0x80u);
-  EXPECT_EQ(static_cast<unsigned char>(program[2]), 0x0Fu);
-  EXPECT_EQ(static_cast<unsigned char>(program[3]), static_cast<unsigned char>(eEnumCommand::Else));
-  EXPECT_EQ(static_cast<unsigned char>(program[4]), 0x01u);
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(eEnumCommand::GroupIf));
+  EXPECT_EQ(static_cast<std::uint8_t>(program[1]), fGroup7thBitSet);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[2]), 0x0Fu);
+  EXPECT_EQ(static_cast<std::uint8_t>(program[3]), static_cast<std::uint8_t>(eEnumCommand::Else));
+  EXPECT_EQ(static_cast<std::uint8_t>(program[4]), 0x01u);
   EXPECT_EQ(std::string_view{ program.data() + 5u }, "one");
 }
 
@@ -811,16 +828,16 @@ TEST(EnumSpecEncoding, ConditionalCommandBranchCountsStoredCommandsNotPairContin
   writer.finish(program);
 
   EXPECT_EQ(
-    static_cast<unsigned char>(program[0]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::GroupIf) | 0x01u));
+    static_cast<std::uint8_t>(program[0]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::GroupIf) | 0x01u));
   EXPECT_EQ(
-    static_cast<unsigned char>(program[3]),
-    static_cast<unsigned char>(static_cast<unsigned char>(eEnumCommand::Named)
-      | static_cast<unsigned char>(eEnumCommand::fHasBitmask)
+    static_cast<std::uint8_t>(program[3]),
+    static_cast<std::uint8_t>(static_cast<std::uint8_t>(eEnumCommand::Named)
+      | static_cast<std::uint8_t>(eEnumCommand::fHasBitmask)
       | 0x0Fu));
   EXPECT_EQ(
-    static_cast<unsigned char>(program[53]),
-    static_cast<unsigned char>(eEnumCommand::ContinueScope));
+    static_cast<std::uint8_t>(program[53]),
+    static_cast<std::uint8_t>(eEnumCommand::ContinueScope));
 }
 
 TEST(EnumSpecBuilder, BuildsRootNamedListAndStoresCmdsId)
@@ -1125,7 +1142,7 @@ TEST(EnumSpecAnyDecode, ReportsParseErrorsAndTerminatePolicy)
   std::string const invalid_numeric_opcode{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Numeric) | 0x08u));
+        static_cast<std::uint8_t>(eEnumCommand::Numeric) | 0x08u));
       writer.write_int(static_cast<std::uint8_t>(0x0Fu));
       writer.write_c_string("bits");
     })
@@ -1173,7 +1190,7 @@ TEST(EnumSpecDecode, DecodesSimpleNamedMaskedNamedAndNumericCommands)
   std::string const named_program{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Named) | 0x01u));
+        static_cast<std::uint8_t>(eEnumCommand::Named) | 0x01u));
       writer.write_int(static_cast<std::uint8_t>(0x01u));
       writer.write_c_string("one");
       writer.write_int(static_cast<std::uint8_t>(0x02u));
@@ -1191,8 +1208,8 @@ TEST(EnumSpecDecode, DecodesSimpleNamedMaskedNamedAndNumericCommands)
   std::string const masked_named_program{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Named) |
-        static_cast<unsigned char>(eEnumCommand::fHasBitmask)));
+        static_cast<std::uint8_t>(eEnumCommand::Named) |
+        static_cast<std::uint8_t>(eEnumCommand::fHasBitmask)));
       writer.write_int(static_cast<std::uint8_t>(0x03u));
       writer.write_int(static_cast<std::uint8_t>(0x02u));
       writer.write_c_string("two");
@@ -1209,8 +1226,8 @@ TEST(EnumSpecDecode, DecodesSimpleNamedMaskedNamedAndNumericCommands)
   std::string const numeric_program{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Numeric) |
-        static_cast<unsigned char>(eEnumCommand::fRightShiftBits)));
+        static_cast<std::uint8_t>(eEnumCommand::Numeric) |
+        static_cast<std::uint8_t>(eEnumCommand::fRightShiftBits)));
       writer.write_int(static_cast<std::uint8_t>(0x30u));
       writer.write_c_string("bits");
     })
@@ -1364,8 +1381,8 @@ TEST(EnumSpecDecode, DecodesCompressedNestedValuesAndZeroCountConditionalBranche
   std::string const compressed_program{
     build_manual_program(storage_header_for<TestEnum>(compress), [&](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::GroupIfNamed) | 0x01u));
-      write_scoped_value(writer, TestEnum{ 0x80u }, root_scope, compress);
+        static_cast<std::uint8_t>(eEnumCommand::GroupIfNamed) | 0x01u));
+      write_group_shift(writer, fGroup7thBitSet);
       write_scoped_value(writer, TestEnum{ 0x70u }, root_scope, compress);
       write_scoped_value(writer, TestEnum{ 0x10u }, TestEnum{ 0x70u }, compress);
       writer.write_c_string("hi");
@@ -1378,7 +1395,7 @@ TEST(EnumSpecDecode, DecodesCompressedNestedValuesAndZeroCountConditionalBranche
   std::string const zero_count_cmd_program{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(eEnumCommand::GroupIf);
-      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(fGroup7thBitSet));
       writer.write_int(static_cast<std::uint8_t>(0x0Fu));
     })
   };
@@ -1390,7 +1407,7 @@ TEST(EnumSpecDecode, DecodesCompressedNestedValuesAndZeroCountConditionalBranche
   std::string const zero_count_named_program{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(eEnumCommand::GroupIfNamed);
-      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(fGroup7thBitSet));
       writer.write_int(static_cast<std::uint8_t>(0x0Fu));
     })
   };
@@ -1402,7 +1419,7 @@ TEST(EnumSpecDecode, DecodesCompressedNestedValuesAndZeroCountConditionalBranche
   std::string const zero_count_with_else_program{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(eEnumCommand::GroupIf);
-      writer.write_int(static_cast<std::uint8_t>(0x80u));
+      writer.write_int(static_cast<std::uint8_t>(fGroup7thBitSet));
       writer.write_int(static_cast<std::uint8_t>(0x0Fu));
       writer.write_opcode(eEnumCommand::Else);
       writer.write_int(static_cast<std::uint8_t>(0x01u));
@@ -1522,34 +1539,18 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   std::string const invalid_numeric_opcode{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Numeric) | 0x08u));
+        static_cast<std::uint8_t>(eEnumCommand::Numeric) | 0x08u));
       writer.write_int(static_cast<std::uint8_t>(0x0Fu));
       writer.write_c_string("bits");
     })
   };
   EXPECT_THROW((void)decode_program(invalid_numeric_opcode), Constexpr::EnumParseInvalidOpcode);
 
-  std::string const zero_group_bitmask{
-    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
-      writer.write_opcode(eEnumCommand::GroupIf);
-      writer.write_int(static_cast<std::uint8_t>(0x00u));
-    })
-  };
-  EXPECT_THROW((void)decode_program(zero_group_bitmask), Constexpr::EnumParseInvalidStructure);
-
-  std::string const multi_bit_group_bitmask{
-    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
-      writer.write_opcode(eEnumCommand::GroupIf);
-      writer.write_int(static_cast<std::uint8_t>(0x03u));
-    })
-  };
-  EXPECT_THROW((void)decode_program(multi_bit_group_bitmask), Constexpr::EnumParseInvalidStructure);
-
   std::string const pair_value_outside_named_mask{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Named) |
-        static_cast<unsigned char>(eEnumCommand::fHasBitmask) |
+        static_cast<std::uint8_t>(eEnumCommand::Named) |
+        static_cast<std::uint8_t>(eEnumCommand::fHasBitmask) |
         0x01u));
       writer.write_int(static_cast<std::uint8_t>(0x03u));
       writer.write_int(static_cast<std::uint8_t>(0x04u));
@@ -1561,7 +1562,7 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   std::string const misplaced_else{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Else) | 0x00u));
+        static_cast<std::uint8_t>(eEnumCommand::Else) | 0x00u));
       writer.write_int(static_cast<std::uint8_t>(0x01u));
       writer.write_c_string("one");
     })
@@ -1590,18 +1591,18 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   std::string const else_command_branch_with_only_noop_conditional{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::GroupIf) | 0x01u));
-      writer.write_int(static_cast<std::uint8_t>(0x80u));
+        static_cast<std::uint8_t>(eEnumCommand::GroupIf) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(fGroup7thBitSet));
       writer.write_int(static_cast<std::uint8_t>(0x0Fu));
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Named) | 0x01u));
+        static_cast<std::uint8_t>(eEnumCommand::Named) | 0x01u));
       writer.write_int(static_cast<std::uint8_t>(0x01u));
       writer.write_c_string("one");
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Else) |
-        static_cast<unsigned char>(eEnumCommand::fElseCmds)));
+        static_cast<std::uint8_t>(eEnumCommand::Else) |
+        static_cast<std::uint8_t>(eEnumCommand::fElseCmds)));
       writer.write_opcode(eEnumCommand::GroupIf);
-      writer.write_int(static_cast<std::uint8_t>(0x08u));
+      writer.write_int(static_cast<std::uint8_t>(fGroup7thBitSet));
       writer.write_int(static_cast<std::uint8_t>(0x03u));
     })
   };
@@ -1610,8 +1611,8 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   std::string const invalid_compressed_scoped_value{
     build_manual_program(storage_header_for<TestEnum>(true), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::GroupIfNamed) | 0x01u));
-      writer.write_dint(static_cast<std::uint8_t>(0x80u));
+        static_cast<std::uint8_t>(eEnumCommand::GroupIfNamed) | 0x01u));
+      writer.write_dint(static_cast<std::uint8_t>(fGroup7thBitSet));
       writer.write_dint(static_cast<std::uint8_t>(0x0Au));
       writer.write_dint(static_cast<std::uint8_t>(0x04u));
       writer.write_c_string("bad");
@@ -1622,8 +1623,8 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
   std::string const duplicate_masked_values{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
       writer.write_opcode(static_cast<eEnumCommand>(
-        static_cast<unsigned char>(eEnumCommand::Named) |
-        static_cast<unsigned char>(eEnumCommand::fHasBitmask) |
+        static_cast<std::uint8_t>(eEnumCommand::Named) |
+        static_cast<std::uint8_t>(eEnumCommand::fHasBitmask) |
         0x01u));
       writer.write_int(static_cast<std::uint8_t>(0x03u));
       writer.write_int(static_cast<std::uint8_t>(0x00u));
