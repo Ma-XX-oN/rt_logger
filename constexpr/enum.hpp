@@ -1852,6 +1852,21 @@ namespace Constexpr {
     };
 
     /**
+     * @brief Validates that one conditional selector mask has exactly one bit
+     *   set.
+     *
+     * @param group_bitmask - Conditional selector bitmask.
+     * @throws EnumParseInvalidStructure when \p group_bitmask does not
+     *   contain exactly one set bit.
+     */
+    template <typename ValueT>
+    constexpr void verify_group_bitmask(ValueT group_bitmask) {
+      if (!has_only_one_bit_set(group_bitmask)) {
+        throw EnumParseInvalidStructure("Conditional group_bitmask must contain exactly one bit.");
+      }
+    }
+
+    /**
      * @brief Shared typed-chaining operations for builder command scopes.
      *
      * @tparam Derived - Concrete command-scope type.
@@ -2181,6 +2196,7 @@ namespace Constexpr {
         item_id_t const group_id{ enum_def.add_item(Group<typename D::value_type>{ group_name_id, {} }) };
 
         Conditional<typename D::value_type> conditional{};
+        verify_group_bitmask(group_bitmask);
         conditional.group_bitmask = group_bitmask;
         conditional.bitmask = scope_bitmask;
         if (negate_first) {
@@ -3053,21 +3069,6 @@ namespace Constexpr {
       static constexpr void verify_scope_subset(value_type value, value_type scope_bitmask) {
         if (!is_subset_of_scope(value, scope_bitmask)) {
           throw EnumParseInvalidStructure("Constrained value exceeds the parent scope bitmask.");
-        }
-      }
-
-      /**
-       * @brief Validates that one conditional selector mask has exactly one bit
-       *   set.
-       *
-       * @param group_bitmask - Conditional selector bitmask.
-       * @throws EnumParseInvalidStructure when \p group_bitmask does not
-       *   contain exactly one set bit.
-       */
-      static constexpr void verify_group_bitmask(value_type group_bitmask) {
-        auto const bits{ make_unsigned_equivalent(group_bitmask) };
-        if (!bits || (bits & (bits - 1u)) != 0u) {
-          throw EnumParseInvalidStructure("Conditional group_bitmask must contain exactly one bit.");
         }
       }
 
