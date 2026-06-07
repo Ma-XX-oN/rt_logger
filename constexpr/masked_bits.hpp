@@ -39,6 +39,29 @@ constexpr std::size_t least_set_bit_index(E mask) {
 }
 
 /**
+ * @brief Gets the number of bits set in a value.
+ * 
+ * @tparam E - Enum or integral type of \p value.
+ * @param value - Value to have bits counted.
+ * @return std::uint8_t - Number of bits set.
+ */
+template <typename E>
+constexpr std::uint8_t count_bits_set(E value) {
+  auto v{ make_unsigned_equivalent(value) };
+  std::uint8_t set_bit_count{0};
+
+  static_assert(
+    std::numeric_limits<decltype(v)>::digits <= std::numeric_limits<decltype(set_bit_count)>::max()
+    , "Cannot represent number of bits in mask.");
+
+  while (v) {
+    v &= v - 1;
+    ++set_bit_count;
+  }
+  return set_bit_count;
+}
+
+/**
  * @brief Packs the bits selected by \p mask into a contiguous field.
  *
  * Iterates from the least significant set bit in \p mask upward, copies each
