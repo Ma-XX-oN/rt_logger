@@ -7,7 +7,6 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <variant>
 
 namespace {
 
@@ -18,11 +17,11 @@ using TestNumeric = Constexpr::impl::Numeric<TestEnum>;
 using TestConditional = Constexpr::impl::Conditional<TestEnum>;
 using TestGroup = Constexpr::impl::Group<TestEnum>;
 using TestCmds = Constexpr::impl::Cmds<TestEnum>;
-using TestSettings = Constexpr::EnumSettings<TestEnum, Constexpr::reserve_space(128, 32)>;
-using LargeTestSettings = Constexpr::EnumSettings<TestEnum, Constexpr::reserve_space(256, 64)>;
+using TestSettings = Constexpr::EnumSettings<TestEnum, Constexpr::pack_space(128, 32)>;
+using LargeTestSettings = Constexpr::EnumSettings<TestEnum, Constexpr::pack_space(256, 64)>;
 using TestEnumDef = Constexpr::Enum<TestSettings>;
 using LargeTestEnumDef = Constexpr::Enum<LargeTestSettings>;
-using AnyTestEnumDef = Constexpr::AnyEnumDescription<Constexpr::reserve_space(128, 32)>;
+using AnyTestEnumDef = Constexpr::AnyEnumDescription<Constexpr::pack_space(128, 32)>;
 using TestBuilder = Constexpr::EnumBuilder<TestSettings>;
 using TestEncoder = Constexpr::impl::EnumEncoder<TestEnumDef>;
 using TestItemId = Constexpr::item_id_t;
@@ -61,7 +60,7 @@ constexpr std::string_view kDecodeProgramSv{ kDecodeProgram, sizeof(kDecodeProgr
 constexpr bool builder_end_returns_exact_parent{
   std::is_same_v<
     decltype(Constexpr::build_enum_description<TestSettings>().If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }).End()),
-    TestBuilder>
+    TestBuilder&>
 };
 static_assert(builder_end_returns_exact_parent);
 
@@ -75,9 +74,9 @@ constexpr bool builder_build_materializes_constexpr_enum{
         .Build()
     };
 
-    static_assert(sizeof(enum_def) == 4384);  // assumes 8 byte alignment
-    static_assert(Constexpr::impl::string_space(enum_def.actual_space()) == 256); // default is 256 storable characters, even if not used.
-    static_assert(Constexpr::impl::item_space(enum_def.actual_space()) == 256);   // default is 256 storable items, even if not used.
+    static_assert(sizeof(enum_def) == 2336);  // assumes 8 byte alignment
+    static_assert(Constexpr::impl::string_space(enum_def.allocated_space()) == 256); // default is 256 storable characters, even if not used.
+    static_assert(Constexpr::impl::item_space(enum_def.allocated_space()) == 128);   // default is 128 storable items, even if not used.
     return enum_def.cmds_id() != 0u;
   }()
 };
@@ -93,8 +92,8 @@ constexpr bool build_enum_macro_materializes_constexpr_enum{
     };
 
     static_assert(sizeof(enum_def) == 88);  // assumes 8 byte alignment
-    static_assert(Constexpr::impl::string_space(enum_def.actual_space()) == 8); // 8 characters stored including NUL terminators
-    static_assert(Constexpr::impl::item_space(enum_def.actual_space()) == 4);   // 4 items stored, 2 Named and 2 Cmds.
+    static_assert(Constexpr::impl::string_space(enum_def.allocated_space()) == 8); // 8 characters stored including NUL terminators
+    static_assert(Constexpr::impl::item_space(enum_def.allocated_space()) == 4);   // 4 items stored, 2 Named and 2 Cmds.
                                                                                        // default is 256 and 256
 
     return enum_def.cmds_id() != 0u;
@@ -132,8 +131,8 @@ constexpr bool decode_program_materializes_constexpr_enum{
         .Build()
     };
 
-    static_assert(Constexpr::impl::string_space(enum_def.reserve_space()) == 8u);
-    static_assert(Constexpr::impl::item_space(enum_def.reserve_space()) == 4u);
+    static_assert(Constexpr::impl::string_space(enum_def.used_space()) == 8u);
+    static_assert(Constexpr::impl::item_space(enum_def.used_space()) == 4u);
     return enum_def.cmds_id() != 0u;
   }()
 };
@@ -147,8 +146,8 @@ constexpr bool build_enum_macro_decodes_constexpr_program{
         .decode_program(kDecodeProgramSv))
     };
 
-    static_assert(Constexpr::impl::string_space(enum_def.actual_space()) == 8u);
-    static_assert(Constexpr::impl::item_space(enum_def.actual_space()) == 4u);
+    static_assert(Constexpr::impl::string_space(enum_def.allocated_space()) == 8u);
+    static_assert(Constexpr::impl::item_space(enum_def.allocated_space()) == 4u);
     return enum_def.cmds_id() != 0u;
   }()
 };
@@ -250,7 +249,7 @@ Constexpr::Enum<Settings> decode_program(std::string_view program, bool throw_on
  * @return Constexpr::AnyEnumDescription<StringAndItemCapacity> - Decoded
  *   variant-backed runtime-selected enum description.
  */
-template <std::uint32_t StringAndItemCapacity = Constexpr::reserve_space(128, 32)>
+template <std::uint32_t StringAndItemCapacity = Constexpr::pack_space(128, 32)>
 Constexpr::AnyEnumDescription<StringAndItemCapacity> decode_any_program(
   std::string_view program,
   bool throw_on_terminate = true)
@@ -1100,15 +1099,15 @@ TEST(EnumSpecAnyDecode, HonorsConfiguredStringAndItemCapacities)
   oversized_name.push_back('\0');
 
   EXPECT_THROW(
-    (void)decode_any_program<Constexpr::reserve_space(4, 32)>(oversized_name),
+    (void)decode_any_program<Constexpr::pack_space(4, 32)>(oversized_name),
     Constexpr::EnumParseCapacityExceeded);
 
   EXPECT_THROW(
-    (void)decode_any_program<Constexpr::reserve_space(128, 3)>(kDecodeProgramSv),
+    (void)decode_any_program<Constexpr::pack_space(128, 3)>(kDecodeProgramSv),
     Constexpr::EnumParseCapacityExceeded);
 
   auto const any_enum{
-    decode_any_program<Constexpr::reserve_space(128, 4)>(kDecodeProgramSv)
+    decode_any_program<Constexpr::pack_space(128, 4)>(kDecodeProgramSv)
   };
   EXPECT_EQ(any_enum.output_program(), std::string{ kDecodeProgramSv });
 }

@@ -268,7 +268,14 @@ namespace Constexpr {
   template <typename AnyEnumT>
   class AnyEnumValueView;
 
-  constexpr std::uint32_t reserve_space(std::uint16_t string_space, std::uint16_t item_space) {
+  /**
+   * @brief Used to pack string_space and item_space into one number.
+   * 
+   * @param string_space - Space to allocate for strings.
+   * @param item_space - Space to allocate for items.
+   * @return std::uint32_t - Packed values.
+   */
+  constexpr std::uint32_t pack_space(std::uint16_t string_space, std::uint16_t item_space) {
     return static_cast<std::uint32_t>(string_space) | (static_cast<std::uint32_t>(item_space) << 16);
   }
   
@@ -288,14 +295,25 @@ namespace Constexpr {
 
     using size_t = std::uint16_t;
 
-    constexpr std::uint16_t string_space(std::uint32_t value) {
-      return static_cast<std::uint16_t>(value);
+    /**
+     * @brief Extract the string space value out of the packed 32 bit number.
+     * 
+     * @param packed_value - Packed value to extract from.
+     * @return std::uint16_t - Unpacked string space value.
+     */
+    constexpr std::uint16_t string_space(std::uint32_t packed_value) {
+      return static_cast<std::uint16_t>(packed_value);
     }
 
-    constexpr std::uint16_t item_space(std::uint32_t value) {
-      return static_cast<std::uint16_t>(value >> 16);
+    /**
+     * @brief Extract the item space value out of the packed 32 bit number.
+     * 
+     * @param packed_value - Packed value to extract from.
+     * @return std::uint16_t - Unpacked item space value.
+     */
+    constexpr std::uint16_t item_space(std::uint32_t packed_value) {
+      return static_cast<std::uint16_t>(packed_value >> 16);
     }
-
 
     using program_cursor_t = char*;
 
@@ -1823,10 +1841,9 @@ namespace Constexpr {
        * @return auto - Updated command scope.
        */
       template <typename D = Derived>
-      constexpr auto Named(typename D::value_type value, std::string_view name) const {
-        auto next{ derived() };
-        next.append_named_pair_impl(false, typename D::value_type{}, value, name);
-        return next;
+      constexpr Derived& Named(typename D::value_type value, std::string_view name) {
+        derived().append_named_pair_impl(false, typename D::value_type{}, value, name);
+        return derived();
       }
 
       /**
@@ -1835,17 +1852,16 @@ namespace Constexpr {
        * @param value - Masked enum value matched by the pair.
        * @param name - Display name for the pair.
        * @param bitmask - Command-local bitmask for the named block.
-       * @return auto - Updated command scope.
+       * @return Derived& - This scope, mutated in-place.
        */
       template <typename D = Derived>
-      constexpr auto Named(
+      constexpr Derived& Named(
         typename D::value_type value,
         std::string_view name,
-        typename D::value_type bitmask) const
+        typename D::value_type bitmask)
       {
-        auto next{ derived() };
-        next.append_named_pair_impl(true, bitmask, value, name);
-        return next;
+        derived().append_named_pair_impl(true, bitmask, value, name);
+        return derived();
       }
 
       /**
@@ -1854,17 +1870,16 @@ namespace Constexpr {
        * @param bitmask - Bitmask selecting the numeric field.
        * @param name - Display label for the numeric field.
        * @param format - Numeric formatting flags.
-       * @return auto - Updated command scope.
+       * @return Derived& - This scope, mutated in-place.
        */
       template <typename D = Derived>
-      constexpr auto Numeric(
+      constexpr Derived& Numeric(
         typename D::value_type bitmask,
         std::string_view name,
-        eEnumCommand format = eEnumCommand{}) const
+        eEnumCommand format = eEnumCommand{})
       {
-        auto next{ derived() };
-        next.append_numeric_impl(bitmask, name, format);
-        return next;
+        derived().append_numeric_impl(bitmask, name, format);
+        return derived();
       }
 
       /**
@@ -1877,10 +1892,9 @@ namespace Constexpr {
       template <typename D = Derived>
       constexpr auto If(
         typename D::value_type group_bitmask,
-        typename D::value_type scope_bitmask) const
+        typename D::value_type scope_bitmask)
       {
-        auto next{ derived() };
-        return next.begin_if_impl(false, group_bitmask, scope_bitmask, {}, false);
+        return derived().begin_if_impl(false, group_bitmask, scope_bitmask, {}, false);
       }
 
       /**
@@ -1895,10 +1909,9 @@ namespace Constexpr {
       constexpr auto If(
         typename D::value_type group_bitmask,
         typename D::value_type scope_bitmask,
-        std::string_view group_name) const
+        std::string_view group_name)
       {
-        auto next{ derived() };
-        return next.begin_if_impl(false, group_bitmask, scope_bitmask, group_name, true);
+        return derived().begin_if_impl(false, group_bitmask, scope_bitmask, group_name, true);
       }
 
       /**
@@ -1912,10 +1925,9 @@ namespace Constexpr {
       template <typename D = Derived>
       constexpr auto IfNot(
         typename D::value_type group_bitmask,
-        typename D::value_type scope_bitmask) const
+        typename D::value_type scope_bitmask)
       {
-        auto next{ derived() };
-        return next.begin_if_impl(true, group_bitmask, scope_bitmask, {}, false);
+        return derived().begin_if_impl(true, group_bitmask, scope_bitmask, {}, false);
       }
 
       /**
@@ -1931,15 +1943,23 @@ namespace Constexpr {
       constexpr auto IfNot(
         typename D::value_type group_bitmask,
         typename D::value_type scope_bitmask,
-        std::string_view group_name) const
+        std::string_view group_name)
       {
-        auto next{ derived() };
-        return next.begin_if_impl(true, group_bitmask, scope_bitmask, group_name, true);
+        return derived().begin_if_impl(true, group_bitmask, scope_bitmask, group_name, true);
       }
 
     protected:
       /**
        * @brief Returns the concrete command-scope object.
+       *
+       * @return Derived& - Concrete scope reference.
+       */
+      constexpr Derived& derived() noexcept {
+        return static_cast<Derived&>(*this);
+      }
+
+      /**
+       * @brief Returns the concrete command-scope object (const overload).
        *
        * @return Derived const& - Concrete scope reference.
        */
@@ -2156,7 +2176,7 @@ namespace Constexpr {
      */
     template <typename Parent>
     class IfScope : public CommandScopeFacade<IfScope<Parent>> {
-      Parent m_parent{};
+      Parent& m_parent;
       item_id_t m_conditional_id{};
       item_id_t m_group_id{};
       CommandScopeState<typename Parent::value_type> m_state{};
@@ -2261,7 +2281,7 @@ namespace Constexpr {
        * @param conditional_id - Stored conditional command id.
        * @param group_id - Stored group id for the active branch.
        */
-      constexpr IfScope(Parent parent, item_id_t conditional_id, item_id_t group_id) noexcept
+      constexpr IfScope(Parent& parent, item_id_t conditional_id, item_id_t group_id) noexcept
       : m_parent{ parent }
       , m_conditional_id{ conditional_id }
       , m_group_id{ group_id }
@@ -2274,9 +2294,8 @@ namespace Constexpr {
        *
        * @return ElseScope<Parent> - Builder state for the else branch.
        */
-      constexpr auto Else() const {
-        auto next{ *this };
-        return next.make_else_scope_impl({}, false);
+      constexpr auto Else() {
+        return make_else_scope_impl({}, false);
       }
 
       /**
@@ -2285,19 +2304,17 @@ namespace Constexpr {
        * @param group_name - Group label for the else branch.
        * @return ElseScope<Parent> - Builder state for the else branch.
        */
-      constexpr auto Else(std::string_view group_name) const {
-        auto next{ *this };
-        return next.make_else_scope_impl(group_name, true);
+      constexpr auto Else(std::string_view group_name) {
+        return make_else_scope_impl(group_name, true);
       }
 
       /**
        * @brief Finish this if scope and return to the exact parent scope type.
        *
-       * @return Parent - Updated parent scope.
+       * @return Parent& - The parent scope, by reference.
        */
-      constexpr Parent End() const {
-        auto next{ *this };
-        return next.finish_impl();
+      constexpr Parent& End() {
+        return finish_impl();
       }
 
     private:
@@ -2347,7 +2364,7 @@ namespace Constexpr {
        *
        * @return Parent - Updated parent scope.
        */
-      constexpr Parent finish_impl() {
+      constexpr Parent& finish_impl() {
         assert(branch_has_commands() || !"Conditional first branches cannot be empty unless a later Else branch supplies the payload.");
         return m_parent;
       }
@@ -2396,7 +2413,7 @@ namespace Constexpr {
      */
     template <typename Parent>
     class ElseScope : public CommandScopeFacade<ElseScope<Parent>> {
-      Parent m_parent{};
+      Parent& m_parent;
       item_id_t m_conditional_id{};
       item_id_t m_group_id{};
       CommandScopeState<typename Parent::value_type> m_state{};
@@ -2501,7 +2518,7 @@ namespace Constexpr {
        * @param conditional_id - Stored conditional command id.
        * @param group_id - Stored group id for the active else branch.
        */
-      constexpr ElseScope(Parent parent, item_id_t conditional_id, item_id_t group_id) noexcept
+      constexpr ElseScope(Parent& parent, item_id_t conditional_id, item_id_t group_id) noexcept
       : m_parent{ parent }
       , m_conditional_id{ conditional_id }
       , m_group_id{ group_id }
@@ -2512,11 +2529,10 @@ namespace Constexpr {
       /**
        * @brief Finish this else scope and return to the exact parent scope type.
        *
-       * @return Parent - Updated parent scope.
+       * @return Parent& - The parent scope, by reference.
        */
-      constexpr Parent End() const {
-        auto next{ *this };
-        return next.finish_impl();
+      constexpr Parent& End() {
+        return finish_impl();
       }
 
     private:
@@ -2536,7 +2552,7 @@ namespace Constexpr {
        *
        * @return Parent - Updated parent scope.
        */
-      constexpr Parent finish_impl() {
+      constexpr Parent& finish_impl() {
         if (branch_has_commands()) {
           return m_parent;
         }
@@ -2609,12 +2625,22 @@ namespace Constexpr {
     }
 
   public:
-    constexpr std::uint32_t reserve_space() const {
-      return Constexpr::reserve_space(strings.used_space(), items.used_space());
+    /**
+     * @brief Packed value containing the amount of string and items currently being used.
+     * 
+     * @return std::uint32_t - The packed used space.
+     */
+    constexpr std::uint32_t used_space() const {
+      return Constexpr::pack_space(strings.used_space(), items.used_space());
     }
 
-    constexpr std::uint32_t actual_space() const {
-      return Constexpr::reserve_space(Settings::MAX_STRING_STORAGE, Settings::MAX_ITEMS_STORAGE);
+    /**
+     * @brief Packed value containing the amount of string and items allocated.
+     * 
+     * @return std::uint32_t - The packed allocated space.
+     */
+    constexpr std::uint32_t allocated_space() const {
+      return Constexpr::pack_space(Settings::MAX_STRING_STORAGE, Settings::MAX_ITEMS_STORAGE);
     }
 
     /**
@@ -3028,7 +3054,7 @@ namespace Constexpr {
        *   would overflow.
        */
       constexpr void ensure_string_capacity(std::size_t bytes_to_add) const {
-        auto const used_bytes{ static_cast<std::size_t>(string_space(m_enum.reserve_space())) };
+        auto const used_bytes{ static_cast<std::size_t>(string_space(m_enum.used_space())) };
         if (used_bytes + bytes_to_add > Settings::MAX_STRING_STORAGE) {
           throw EnumParseCapacityExceeded("Decoded strings exceed the destination enum capacity.");
         }
@@ -3042,7 +3068,7 @@ namespace Constexpr {
        *   overflow.
        */
       constexpr void ensure_item_capacity() const {
-        auto const used_items{ static_cast<std::size_t>(item_space(m_enum.reserve_space())) };
+        auto const used_items{ static_cast<std::size_t>(item_space(m_enum.used_space())) };
         if (used_items + 1u > Settings::MAX_ITEMS_STORAGE) {
           throw EnumParseCapacityExceeded("Decoded items exceed the destination enum capacity.");
         }
@@ -3686,10 +3712,32 @@ namespace Constexpr {
      *
      * @return std::uint32_t - Packed used-space summary.
      */
-    constexpr std::uint32_t reserve_space() const {
-      return m_enum.reserve_space();
+    constexpr std::uint32_t used_space() const {
+      return m_enum.used_space();
     }
   };
+
+  /**
+   * @brief Default fixed-capacity storage budget used by enum-description
+   * builders and wrappers when the caller does not override it.
+   */
+  constexpr std::uint32_t DefaultReserved{ pack_space(256, 128) };
+
+  /**
+   * @brief Immutable enum-representation settings bundling value type and
+   *   fixed storage capacities.
+   *
+   * @tparam ValueT - Enum or integer value type stored by the representation.
+   * @tparam StringAndItemCapacity - Packed storage reservation with string
+   *   space in the low 16 bits and item space in the high 16 bits.
+   */
+  template <typename ValueT, std::uint32_t StringAndItemCapacity = DefaultReserved>
+  struct EnumSettings {
+    using value_type = ValueT;
+    constexpr static std::uint16_t MAX_STRING_STORAGE { impl::string_space(StringAndItemCapacity) };
+    constexpr static std::uint16_t MAX_ITEMS_STORAGE  { impl::item_space(StringAndItemCapacity)  };
+  };
+
 
   /**
    * @brief Typed-chaining builder for immutable enum descriptions.
@@ -3794,7 +3842,7 @@ namespace Constexpr {
      * @return bool - \c true when no root commands or stored payload exist yet.
      */
     constexpr bool is_empty_builder() const noexcept {
-      return m_state.first_cmd_id == 0u && m_enum.reserve_space() == 0u;
+      return m_state.first_cmd_id == 0u && m_enum.used_space() == 0u;
     }
 
   public:
@@ -3821,7 +3869,7 @@ namespace Constexpr {
     /**
      * @brief Decode one definition stream as a terminal builder-chain step.
      *
-     * After calling this function, only \c Build() and \c reserve_space() stay
+     * After calling this function, only \c Build() and \c used_space() stay
      * available on the returned wrapper.
      *
      * @param program - Definition stream including the storage-type header.
@@ -3840,9 +3888,31 @@ namespace Constexpr {
         impl::EnumDecoder<Settings>{ program, throw_on_terminate }.decode()
       };
     }
+    
+    /**
+     * @brief Allows to specify a default for string and items for the Enum.
+     *
+     * NOTE: Use only at the very beginning as any previous commands will be
+     *       lost.
+     *
+     * @tparam string_space - Number of string characters + NUL allocated for
+     *   string storage.
+     * @tparam item_space - Number of internal representational commands
+     *   allocated (Named, Numeric, Pairs, Cmds, Conditional, Group)
+     * @return EnumBuilder<NewSettings> - The new EnumBuilder.
+     */
+    template <std::uint16_t string_space, std::uint16_t item_space>
+    constexpr auto reserve_space() {
+      return EnumBuilder<EnumSettings<typename Settings::value_type, pack_space(string_space, item_space)>>{};
+    }
 
-    constexpr std::uint32_t reserve_space() const {
-      return m_enum.reserve_space();
+    /**
+     * @brief Returns the configured fixed-capacity storage budget.
+     *
+     * @return std::uint32_t - Packed string/item capacity summary.
+     */
+    constexpr std::uint32_t used_space() const {
+      return m_enum.used_space();
     }
   };
 
@@ -3856,27 +3926,6 @@ namespace Constexpr {
   constexpr auto build_enum_description() {
     return EnumBuilder<Settings>{};
   }
-
-  /**
-   * @brief Default fixed-capacity storage budget used by enum-description
-   * builders and wrappers when the caller does not override it.
-   */
-  constexpr std::uint32_t DefaultReserved{ reserve_space(256, 128) };
-
-  /**
-   * @brief Immutable enum-representation settings bundling value type and
-   *   fixed storage capacities.
-   *
-   * @tparam ValueT - Enum or integer value type stored by the representation.
-   * @tparam StringAndItemCapacity - Packed storage reservation with string
-   *   space in the low 16 bits and item space in the high 16 bits.
-   */
-  template <typename ValueT, std::uint32_t StringAndItemCapacity = DefaultReserved>
-  struct EnumSettings {
-    using value_type = ValueT;
-    constexpr static std::uint16_t MAX_STRING_STORAGE { impl::string_space(StringAndItemCapacity) };
-    constexpr static std::uint16_t MAX_ITEMS_STORAGE  { impl::item_space(StringAndItemCapacity)  };
-  };
 
   /**
    * @brief Variant-backed runtime-selected wrapper around one decoded typed
@@ -4303,7 +4352,7 @@ namespace Constexpr {
      *
      * @return std::uint32_t - Packed string/item capacity summary.
      */
-    constexpr std::uint32_t reserve_space() const noexcept {
+    constexpr std::uint32_t allocated_space() const noexcept {
       return StringAndItemCapacity;
     }
   };
@@ -4341,7 +4390,7 @@ namespace Constexpr {
     Constexpr::EnumSettings<                                                  \
       enum_type,                                                              \
       Constexpr::build_enum_description<Constexpr::EnumSettings<enum_type>>() \
-        enum_description.reserve_space()                                      \
+        enum_description.used_space()                                         \
     >                                                                         \
   >() enum_description.Build())
 
