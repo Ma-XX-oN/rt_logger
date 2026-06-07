@@ -240,6 +240,24 @@ namespace Constexpr {
 
     protected:
       /**
+       * @brief Returns whether \p value is a bitwise subset of \p mask.
+       *
+       * Works for both integral types and enum classes via
+       * \c make_unsigned_equivalent.
+       *
+       * @tparam T - Value type (integral or enum).
+       * @param value - Candidate subset value.
+       * @param mask - Superset mask to test against.
+       * @return bool - \c true when every set bit in \p value is also set in \p mask.
+       */
+      template <typename T>
+      static constexpr bool is_subset_of(T value, T mask) noexcept {
+        auto const uv{ make_unsigned_equivalent(value) };
+        auto const um{ make_unsigned_equivalent(mask) };
+        return (uv & um) == uv;
+      }
+
+      /**
        * @brief Returns the concrete command-scope object.
        *
        * @return Derived& - Concrete scope reference.
@@ -372,6 +390,13 @@ namespace Constexpr {
         typename D::value_type value,
         std::string_view name)
       {
+        if (has_mask) {
+          assert(is_subset_of(bitmask, scope.scope_bitmask()) || !"Named bitmask must be a subset of the parent scope_bitmask");
+          assert(is_subset_of(value, bitmask) || !"Named value must be a subset of its command bitmask");
+        } else {
+          assert(is_subset_of(value, scope.scope_bitmask()) || !"Named value must be a subset of the parent scope_bitmask");
+        }
+
         auto& enum_def{ scope.enum_ref() };
         auto& implicit{ scope.command_state().implicit_named };
         item_id_t const named_id{ ensure_named_target(scope, has_mask, bitmask) };
@@ -404,6 +429,7 @@ namespace Constexpr {
         std::string_view name,
         eEnumCommand format)
       {
+        assert(is_subset_of(bitmask, scope.scope_bitmask()) || !"Numeric bitmask must be a subset of the parent scope_bitmask");
         clear_implicit_named(scope);
 
         auto& enum_def{ scope.enum_ref() };
@@ -446,6 +472,8 @@ namespace Constexpr {
 
         Conditional<typename D::value_type> conditional{};
         verify_group_bitmask(group_bitmask);
+        assert(is_subset_of(group_bitmask, scope.scope_bitmask()) || !"group_bitmask must be a subset of the parent scope_bitmask");
+        assert(is_subset_of(scope_bitmask, scope.scope_bitmask()) || !"scope_bitmask must be a subset of the parent scope_bitmask");
         conditional.group_bitmask = group_bitmask;
         conditional.bitmask = scope_bitmask;
         if (negate_first) {
@@ -456,7 +484,7 @@ namespace Constexpr {
 
         item_id_t const conditional_id{ enum_def.add_item(conditional) };
         append_command_node(scope, conditional_id);
-        return IfScope<D>{ scope, conditional_id, group_id };
+        return IfScope<D>{ scope, conditional_id, group_id, scope_bitmask };
       }
     };
 
@@ -470,6 +498,7 @@ namespace Constexpr {
       Parent& m_parent;
       item_id_t m_conditional_id{};
       item_id_t m_group_id{};
+      typename Parent::value_type m_scope_bitmask{};
       CommandScopeState<typename Parent::value_type> m_state{};
 
       template <typename Derived>
@@ -572,13 +601,25 @@ namespace Constexpr {
        * @param conditional_id - Stored conditional command id.
        * @param group_id - Stored group id for the active branch.
        */
-      constexpr IfScope(Parent& parent, item_id_t conditional_id, item_id_t group_id) noexcept
+      constexpr IfScope(
+        Parent& parent,
+        item_id_t conditional_id,
+        item_id_t group_id,
+        typename Parent::value_type scope_bitmask) noexcept
       : m_parent{ parent }
       , m_conditional_id{ conditional_id }
       , m_group_id{ group_id }
+      , m_scope_bitmask{ scope_bitmask }
       , m_state{}
       {
       }
+
+      /**
+       * @brief Returns the active scope bitmask constraining values in this branch.
+       *
+       * @return value_type - Scope bitmask for this if branch.
+       */
+      constexpr value_type scope_bitmask() const noexcept { return m_scope_bitmask; }
 
       /**
        * @brief Switch this conditional from its if branch to its else branch.
@@ -646,7 +687,7 @@ namespace Constexpr {
           conditional.true_group_id = m_group_id;
         }
 
-        return ElseScope<Parent>{ m_parent, m_conditional_id, m_group_id };
+        return ElseScope<Parent>{ m_parent, m_conditional_id, m_group_id, m_scope_bitmask };
       }
 
       /**
@@ -693,7 +734,7 @@ namespace Constexpr {
           conditional.true_group_id = group_id;
         }
 
-        return ElseScope<Parent>{ m_parent, m_conditional_id, group_id };
+        return ElseScope<Parent>{ m_parent, m_conditional_id, group_id, m_scope_bitmask };
       }
     };
 
@@ -707,6 +748,7 @@ namespace Constexpr {
       Parent& m_parent;
       item_id_t m_conditional_id{};
       item_id_t m_group_id{};
+      typename Parent::value_type m_scope_bitmask{};
       CommandScopeState<typename Parent::value_type> m_state{};
 
       template <typename Derived>
@@ -809,13 +851,25 @@ namespace Constexpr {
        * @param conditional_id - Stored conditional command id.
        * @param group_id - Stored group id for the active else branch.
        */
-      constexpr ElseScope(Parent& parent, item_id_t conditional_id, item_id_t group_id) noexcept
+      constexpr ElseScope(
+        Parent& parent,
+        item_id_t conditional_id,
+        item_id_t group_id,
+        typename Parent::value_type scope_bitmask) noexcept
       : m_parent{ parent }
       , m_conditional_id{ conditional_id }
       , m_group_id{ group_id }
+      , m_scope_bitmask{ scope_bitmask }
       , m_state{}
       {
       }
+
+      /**
+       * @brief Returns the active scope bitmask constraining values in this branch.
+       *
+       * @return value_type - Scope bitmask for this else branch.
+       */
+      constexpr value_type scope_bitmask() const noexcept { return m_scope_bitmask; }
 
       /**
        * @brief Finish this else scope and return to the exact parent scope type.
@@ -1006,6 +1060,17 @@ namespace Constexpr {
       auto result{ m_enum };
       result.set_cmds_id(m_state.first_cmd_id);
       return result;
+    }
+
+    /**
+     * @brief Returns the scope bitmask for the root builder.
+     *
+     * The root scope has no parent constraint, so all bits are valid.
+     *
+     * @return value_type - All-ones mask.
+     */
+    constexpr value_type scope_bitmask() const noexcept {
+      return static_cast<value_type>(~make_unsigned_equivalent(value_type{}));
     }
 
     /**

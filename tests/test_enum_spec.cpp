@@ -1062,6 +1062,162 @@ TEST(EnumSpecBuilder, CanonicalizesEmptyConditionalBranches)
 #endif
 }
 
+TEST(EnumSpecBuilder, RejectsGroupBitmaskOutsideParentScopeBitmask)
+{
+  // A group_bitmask that is not a subset of the enclosing scope_bitmask violates the documented
+  // subset rule and must be caught at the builder level before a corrupt program is emitted.
+
+  // Valid: group_bitmask 0x08 is inside the parent scope_bitmask 0x0F — should build and render.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+          .If(TestEnum{ 0x08u }, TestEnum{ 0x07u })
+            .Named(TestEnum{ 0x01u }, "inner")
+          .End()
+        .End()
+        .Build()
+    };
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x89u }), "inner");
+  }
+
+  // Valid: group_bitmask 0x04 inside an else-branch scope_bitmask 0x0F — should build and render.
+  {
+    TestEnumDef const enum_def{
+      Constexpr::build_enum_description<TestSettings>()
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+          .Named(TestEnum{ 0x01u }, "if-val")
+        .Else()
+          .If(TestEnum{ 0x04u }, TestEnum{ 0x03u })
+            .Named(TestEnum{ 0x01u }, "else-inner")
+          .End()
+        .End()
+        .Build()
+    };
+    EXPECT_EQ(render_enum(enum_def, TestEnum{ 0x05u }), "else-inner");
+  }
+
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  // Invalid: group_bitmask 0x80 is outside parent if-branch scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x03u })
+          .Named(TestEnum{ 0x01u }, "bad")
+        .End()
+      .End()
+      .Build(),
+    ""
+  );
+
+  // Invalid: group_bitmask 0x80 is outside parent else-branch scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Named(TestEnum{ 0x01u }, "if-val")
+      .Else()
+        .If(TestEnum{ 0x80u }, TestEnum{ 0x03u })
+          .Named(TestEnum{ 0x01u }, "bad")
+        .End()
+      .End()
+      .Build(),
+    ""
+  );
+#endif
+}
+
+TEST(EnumSpecBuilder, RejectsScopeBitmaskOutsideParentScopeBitmask)
+{
+  // The scope_bitmask passed to If() must itself be a subset of the enclosing scope_bitmask.
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  // Invalid: scope_bitmask 0xFF is outside parent if-branch scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .If(TestEnum{ 0x08u }, TestEnum{ 0xFFu })
+          .Named(TestEnum{ 0x01u }, "bad")
+        .End()
+      .End()
+      .Build(),
+    ""
+  );
+
+  // Invalid: scope_bitmask 0xFF is outside parent else-branch scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Named(TestEnum{ 0x01u }, "if-val")
+      .Else()
+        .If(TestEnum{ 0x04u }, TestEnum{ 0xFFu })
+          .Named(TestEnum{ 0x01u }, "bad")
+        .End()
+      .End()
+      .Build(),
+    ""
+  );
+#endif
+}
+
+TEST(EnumSpecBuilder, RejectsNamedValueOutsideScopeBitmask)
+{
+  // Named values and their command bitmasks must be subsets of the enclosing scope_bitmask.
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  // Invalid: value 0x80 is outside scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Named(TestEnum{ 0x80u }, "bad")
+      .End()
+      .Build(),
+    ""
+  );
+
+  // Invalid: command bitmask 0xFF is outside scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Named(TestEnum{ 0x01u }, "bad", TestEnum{ 0xFFu })
+      .End()
+      .Build(),
+    ""
+  );
+
+  // Invalid: value 0x08 is outside command bitmask 0x07.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Named(TestEnum{ 0x08u }, "bad", TestEnum{ 0x07u })
+      .End()
+      .Build(),
+    ""
+  );
+#endif
+}
+
+TEST(EnumSpecBuilder, RejectsNumericBitmaskOutsideScopeBitmask)
+{
+  // Numeric bitmasks must be subsets of the enclosing scope_bitmask.
+#ifdef NDEBUG
+  GTEST_SKIP() << "Assert-dependent tests are skipped in release builds.";
+#else
+  // Invalid: bitmask 0xFF is outside scope_bitmask 0x0F.
+  EXPECT_DEATH(
+    (void)Constexpr::build_enum_description<TestSettings>()
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu })
+        .Numeric(TestEnum{ 0xFFu }, "bad")
+      .End()
+      .Build(),
+    ""
+  );
+#endif
+}
+
 TEST(EnumSpecAnyDecode, HeaderOnlyProgramsDispatchAllStorageKinds)
 {
   // The variant-backed runtime-selected builder should dispatch each supported storage header into the matching typed alternative.
@@ -1886,8 +2042,8 @@ TEST(EnumSpecRender, MergesConditionalGroupOutputWithoutRenderingGroupNames)
   TestEnumDef const enum_def{
     Constexpr::build_enum_description<TestSettings>()
       .Named(TestEnum{ 0x40u }, "ROOT", TestEnum{ 0x40u })
-      .If(TestEnum{ 0x80u }, TestEnum{ 0x0Fu }, "ifg")
-        .Named(TestEnum{ 0x01u }, "IF")
+      .If(TestEnum{ 0x80u }, TestEnum{ 0x3Fu }, "ifg")
+        .Named(TestEnum{ 0x11u }, "IF")
         .Numeric(TestEnum{ 0x30u }, "bits", eEnumCommand::fRightShiftBits)
       .Else("elseg")
         .Named(TestEnum{ 0x00u }, "ELSE")
