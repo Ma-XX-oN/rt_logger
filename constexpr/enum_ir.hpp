@@ -777,8 +777,11 @@ namespace Constexpr {
       bool m_compress{};
 
     public:
+      // Enum description type
       using enum_type = EnumT;
+      // Underlying enum or integral value type
       using value_type = typename EnumT::value_type;
+      // unsigned underlying integral value type
       using unsigned_value_type = unsigned_equivalent_t<value_type>;
       using writer_type = WriterT;
       using cursor_type = typename writer_type::cursor_type;

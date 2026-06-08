@@ -567,6 +567,9 @@ namespace Constexpr { namespace impl {
         unsigned_value_type const command_mask{
           has_bitmask ? read_scoped_bitmask(scope_bitmask) : unsigned_value_type{}
         };
+        if (has_bitmask && !command_mask) {
+          throw EnumParseInvalidStructure("Named command bitmask cannot be zero.");
+        }
         unsigned_value_type const pair_scope_bitmask{ has_bitmask ? command_mask : scope_bitmask };
         item_id_t const named_id{
           parse_pair_branch(
@@ -591,6 +594,9 @@ namespace Constexpr { namespace impl {
       constexpr item_id_t parse_numeric_command(std::uint8_t opcode, unsigned_value_type scope_bitmask) {
         validate_numeric_opcode(opcode);
         unsigned_value_type const bitmask{ read_scoped_bitmask(scope_bitmask) };
+        if (!bitmask) {
+          throw EnumParseInvalidStructure("Numeric command bitmask cannot be zero.");
+        }
         string_id_t const name_id{ store_string(read_c_string_view()) };
         eEnumCommand const format{
           static_cast<eEnumCommand>(opcode & static_cast<std::uint8_t>(
@@ -616,6 +622,9 @@ namespace Constexpr { namespace impl {
         unsigned_value_type const group_bitmask{ read_scoped_group_mask_value(scope_bitmask) };
         verify_group_bitmask(group_bitmask);
         unsigned_value_type const branch_scope_bitmask{ read_scoped_bitmask(scope_bitmask) };
+        if (!branch_scope_bitmask) {
+          throw EnumParseInvalidStructure("GroupIf scope_bitmask cannot be zero.");
+        }
         string_id_t const group_name_id{
           (opcode & static_cast<std::uint8_t>(eEnumCommand::fHasGroupName)) != 0u
             ? store_string(read_c_string_view())

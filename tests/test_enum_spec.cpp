@@ -1434,6 +1434,32 @@ TEST(EnumSpecDecode, DecodesSimpleNamedMaskedNamedAndNumericCommands)
   EXPECT_EQ(render_enum(numeric_enum, TestEnum{ 0x10u }), "bits=1");
 }
 
+TEST(EnumSpecDecode, DecodesNumericFormatFlagCombinations)
+{
+  // Each format flag combination should round-trip through encode/decode with the correct stored format field.
+  auto const check_flags = [](eEnumCommand flags) {
+    TestEnumDef const source{
+      Constexpr::build_enum_description<TestSettings>()
+        .Numeric(TestEnum{ 0x30u }, "bits", flags)
+        .Build()
+    };
+    TestEnumDef const decoded{ decode_program(encode_program_with_header(source)) };
+    auto const& cmds{ decoded.item<TestCmds>(decoded.cmds_id()) };
+    auto const* numeric{ decoded.item_if<TestNumeric>(cmds.command_id) };
+    ASSERT_NE(numeric, nullptr);
+    EXPECT_EQ(numeric->mask, 0x30u);
+    EXPECT_EQ(numeric->format, flags);
+  };
+
+  using E = eEnumCommand;
+  check_flags(E{});
+  check_flags(E::fPackedBits);
+  check_flags(E::fIsSigned);
+  check_flags(E::fPackedBits | E::fIsSigned);
+  check_flags(E::fRightShiftBits | E::fIsSigned);
+  check_flags(E::fRightShiftBits | E::fPackedBits | E::fIsSigned);
+}
+
 TEST(EnumSpecDecode, DecodesGroupIfCommandBranches)
 {
   // Command-shaped conditional branches should rebuild as stored Groups containing command lists.
@@ -1739,6 +1765,55 @@ TEST(EnumSpecDecode, ReportsRuntimeParseErrors)
     })
   };
   EXPECT_THROW((void)decode_program(invalid_numeric_opcode), Constexpr::EnumParseInvalidOpcode);
+
+  std::string const numeric_bitmask_outside_scope{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<std::uint8_t>(eEnumCommand::GroupIf) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(3u));    // group_shift=3, group_mask=0x08 (within 0xFF)
+      writer.write_int(static_cast<std::uint8_t>(0x0Fu)); // branch scope_bitmask=0x0F
+      writer.write_opcode(eEnumCommand::Numeric);
+      writer.write_int(static_cast<std::uint8_t>(0x30u)); // bitmask 0x30 is not a subset of scope 0x0F
+      writer.write_c_string("bits");
+    })
+  };
+  EXPECT_THROW((void)decode_program(numeric_bitmask_outside_scope), Constexpr::EnumParseInvalidStructure);
+
+  std::string const zero_numeric_bitmask{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(eEnumCommand::Numeric);
+      writer.write_int(static_cast<std::uint8_t>(0x00u)); // zero bitmask
+      writer.write_c_string("bits");
+    })
+  };
+  EXPECT_THROW((void)decode_program(zero_numeric_bitmask), Constexpr::EnumParseInvalidStructure);
+
+  std::string const zero_named_bitmask{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<std::uint8_t>(eEnumCommand::Named) |
+        static_cast<std::uint8_t>(eEnumCommand::fHasBitmask) |
+        0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x00u)); // zero bitmask
+      writer.write_int(static_cast<std::uint8_t>(0x00u));
+      writer.write_c_string("zero");
+    })
+  };
+  EXPECT_THROW((void)decode_program(zero_named_bitmask), Constexpr::EnumParseInvalidStructure);
+
+  std::string const zero_group_if_scope_bitmask{
+    build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<std::uint8_t>(eEnumCommand::GroupIf) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(fGroup7thBitSet)); // group_shift=7, group_mask=0x80
+      writer.write_int(static_cast<std::uint8_t>(0x00u));           // zero scope_bitmask
+      writer.write_opcode(static_cast<eEnumCommand>(
+        static_cast<std::uint8_t>(eEnumCommand::Named) | 0x01u));
+      writer.write_int(static_cast<std::uint8_t>(0x00u));
+      writer.write_c_string("zero");
+    })
+  };
+  EXPECT_THROW((void)decode_program(zero_group_if_scope_bitmask), Constexpr::EnumParseInvalidStructure);
 
   std::string const pair_value_outside_named_mask{
     build_manual_program(storage_header_for<TestEnum>(), [](auto& writer) {
@@ -2069,6 +2144,230 @@ TEST(EnumSpecBuilder, RejectsDuplicateNamedValuesWithinOneMaskedGroup)
     ""
   );
 #endif
+}
+
+/**
+ * @brief Small scoped enum used to verify scoped enum masks compile.
+ *
+ * The one-byte underlying type exercises enum mask conversion without relying
+ * on implicit conversion to bool or to an integer type.
+ */
+enum class SmallFlags : std::uint8_t {
+  A = 0x01u,
+};
+
+/**
+ * @brief Wider scoped enum used to verify compressed scoped enum programs.
+ *
+ * The two-byte underlying type allows compression to remain enabled while also
+ * exercising scoped enum values, numeric fields, and conditional branches.
+ */
+enum class WideFlags : std::uint16_t {
+  None     = 0x0000u,
+  A        = 0x0001u,
+  Field    = 0x00F0u,
+  FieldOne = 0x0010u,
+  Group    = 0x8000u,
+  GroupField = 0x8010u,
+};
+
+TEST(EnumSpecRender, ScopedEnumNumericCompilesAndRenders)
+{
+  // Numeric() should accept a scoped enum mask and render the extracted field value.
+  using Settings = Constexpr::EnumSettings<SmallFlags>;
+
+  auto const enum_def{
+    Constexpr::build_enum_description<Settings>()
+      .Numeric(SmallFlags::A, "a")
+      .Build()
+  };
+
+  EXPECT_EQ(render_enum_value(enum_def, SmallFlags::A), "a=1");
+}
+
+TEST(EnumSpecEncoding, Uint8CompressedRequestIsIgnoredConsistently)
+{
+  // output_program(true) should produce identical bytes to output_program(false)
+  // for one-byte value types because the encoder clears the compress flag at
+  // enum_core.hpp:68 when sizeof(value_type) == 1.
+  using Settings = Constexpr::EnumSettings<std::uint8_t>;
+
+  auto const enum_def{
+    Constexpr::build_enum_description<Settings>()
+      .Named(std::uint8_t{0x80u}, "hi")
+      .Build()
+  };
+
+  auto const uncompressed_program{ enum_def.output_program(false, false) };
+  auto const compressed_request_program{ enum_def.output_program(true, false) };
+
+  EXPECT_EQ(compressed_request_program, uncompressed_program);
+
+  auto const decoded{ decode_program<Settings>(compressed_request_program) };
+  EXPECT_EQ(render_enum_value(decoded, std::uint8_t{0x80u}), "hi");
+}
+
+TEST(EnumSpecDecode, Uint8AllValuesRoundTripCompressedAndUncompressed)
+{
+  // All 256 uint8_t bit patterns should render identically after a round-trip
+  // through both the uncompressed and the compression-requested stream.
+  using Settings = Constexpr::EnumSettings<
+    std::uint8_t,
+    Constexpr::pack_space(256, 128)
+  >;
+
+  auto const source{
+    Constexpr::build_enum_description<Settings>()
+      .Named(std::uint8_t{0x00u}, "ZERO")
+      .Named(std::uint8_t{0x01u}, "A")
+      .Named(std::uint8_t{0x02u}, "B")
+      .Numeric(
+        std::uint8_t{0x30u},
+        "F",
+        eEnumCommand::fRightShiftBits)
+      .If(std::uint8_t{0x80u}, std::uint8_t{0x0Fu})
+        .Named(std::uint8_t{0x01u}, "if-one")
+      .Else()
+        .Named(std::uint8_t{0x00u}, "else-zero")
+        .Named(std::uint8_t{0x04u}, "else-four")
+      .End()
+      .Build()
+  };
+
+  auto const decoded_uncompressed{
+    decode_program<Settings>(source.output_program(false, false))
+  };
+  auto const decoded_compressed_request{
+    decode_program<Settings>(source.output_program(true, false))
+  };
+
+  for (std::uint16_t i{0}; i <= std::uint16_t{255}; ++i) {
+    auto const value{ static_cast<std::uint8_t>(i) };
+    auto const expected{ render_enum_value(source, value) };
+
+    EXPECT_EQ(render_enum_value(decoded_uncompressed, value), expected)
+      << "value " << i;
+    EXPECT_EQ(render_enum_value(decoded_compressed_request, value), expected)
+      << "value " << i;
+  }
+}
+
+TEST(EnumSpecDecode, Int8AllBitPatternsRoundTripCompressedAndUncompressed)
+{
+  // All 256 int8_t bit patterns should render identically after a round-trip,
+  // covering signed high-bit names, signed right-shifted fields, and signed packed fields.
+  using Settings = Constexpr::EnumSettings<
+    std::int8_t,
+    Constexpr::pack_space(256, 128)
+  >;
+  using Constexpr::bit_cast;
+  auto const source{
+    Constexpr::build_enum_description<Settings>()
+      .Named(bit_cast<std::int8_t>(std::uint8_t{0x80u}), "HI")
+      .Numeric(
+        bit_cast<std::int8_t>(std::uint8_t{0xF0u}),
+        "hi",
+        eEnumCommand::fIsSigned | eEnumCommand::fRightShiftBits)
+      .Numeric(
+        bit_cast<std::int8_t>(std::uint8_t{0x0Au}),
+        "packed",
+        eEnumCommand::fIsSigned | eEnumCommand::fPackedBits)
+      .If(
+        bit_cast<std::int8_t>(std::uint8_t{0x80u}),
+        bit_cast<std::int8_t>(std::uint8_t{0x0Fu}))
+        .Named(bit_cast<std::int8_t>(std::uint8_t{0x01u}), "if-one")
+      .Else()
+        .Named(bit_cast<std::int8_t>(std::uint8_t{0x00u}), "else-zero")
+        .Named(bit_cast<std::int8_t>(std::uint8_t{0x04u}), "else-four")
+      .End()
+      .Build()
+  };
+
+  auto const decoded_uncompressed{
+    decode_program<Settings>(source.output_program(false, false))
+  };
+  auto const decoded_compressed_request{
+    decode_program<Settings>(source.output_program(true, false))
+  };
+
+  for (std::uint16_t i{0}; i <= std::uint16_t{255}; ++i) {
+    auto const value{ bit_cast<std::int8_t>(static_cast<std::uint8_t>(i)) };
+    auto const expected{ render_enum_value(source, value) };
+
+    EXPECT_EQ(render_enum_value(decoded_uncompressed, value), expected)
+      << "value " << i;
+    EXPECT_EQ(render_enum_value(decoded_compressed_request, value), expected)
+      << "value " << i;
+  }
+}
+
+TEST(EnumSpecDecode, ContinuationBoundaryRoundTripPreservesAllPairs)
+{
+  // Building enough named pairs through the public builder API to force
+  // ContinueScope emission should preserve every pair's render output after decode.
+  using Settings = Constexpr::EnumSettings<
+    std::uint8_t,
+    Constexpr::pack_space(512, 512)
+  >;
+
+  auto builder{ Constexpr::build_enum_description<Settings>() };
+  for (std::uint16_t i{1}; i <= std::uint16_t{40}; ++i) {
+    builder.Named(
+      static_cast<std::uint8_t>(i),
+      std::string{"v"} + std::to_string(i));
+  }
+
+  auto const source{ builder.Build() };
+  auto const decoded{
+    decode_program<Settings>(source.output_program(false, false))
+  };
+
+  for (std::uint16_t i{1}; i <= std::uint16_t{40}; ++i) {
+    auto const value{ static_cast<std::uint8_t>(i) };
+    auto const expected{ std::string{"v"} + std::to_string(i) };
+
+    EXPECT_EQ(render_enum_value(decoded, value), expected)
+      << "value " << i;
+  }
+}
+
+TEST(EnumSpecDecode, ScopedEnumCompressedRoundTripPreservesRendering)
+{
+  // A compressed stream encoding a two-byte scoped enum should round-trip through
+  // the decoder and still produce matching rendered output for sampled values.
+  using Settings = Constexpr::EnumSettings<
+    WideFlags,
+    Constexpr::pack_space(256, 128)
+  >;
+
+  auto const source{
+    Constexpr::build_enum_description<Settings>()
+      .Named(WideFlags::A, "A")
+      .Numeric(
+        WideFlags::Field,
+        "field",
+        eEnumCommand::fRightShiftBits)
+      .If(WideFlags::Group, WideFlags::Field)
+        .Named(WideFlags::FieldOne, "group-field")
+      .Else()
+        .Named(WideFlags::None, "none")
+      .End()
+      .Build()
+  };
+
+  auto const decoded{
+    decode_program<Settings>(source.output_program(true, false))
+  };
+
+  EXPECT_EQ(
+    render_enum_value(decoded, WideFlags::None),
+    render_enum_value(source, WideFlags::None));
+  EXPECT_EQ(
+    render_enum_value(decoded, WideFlags::A),
+    render_enum_value(source, WideFlags::A));
+  EXPECT_EQ(
+    render_enum_value(decoded, WideFlags::GroupField),
+    render_enum_value(source, WideFlags::GroupField));
 }
 
 } // namespace

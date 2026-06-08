@@ -233,6 +233,7 @@ namespace Constexpr {
   template <typename AnyEnumT>
   class AnyEnumValueView {
     AnyEnumT const* m_enum_def{};
+    // Underlying value
     std::uint64_t m_value_bits{};
 
     /**

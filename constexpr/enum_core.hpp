@@ -33,15 +33,20 @@ namespace Constexpr {
   template <typename Settings>
   class Enum {
   public:
+      // Underlying enum or integral value type
     using value_type = typename Settings::value_type;
+    // Command type stored in items storage
     using command_t = std::variant<
       impl::Pairs<value_type>, impl::Named<value_type>, impl::Numeric<value_type>,
       impl::Cmds<value_type>, impl::Group<value_type>, impl::Conditional<value_type>
     >;
 
   private:
+    // Command id where the program starts
     item_id_t m_cmds_id{};
+    // Storage for all strings
     Strings<Settings::MAX_STRING_STORAGE> strings{};
+    // Storage for all command items
     Items<Settings::MAX_ITEMS_STORAGE, command_t> items{};
 
     /**
@@ -50,6 +55,7 @@ namespace Constexpr {
      * @tparam WriterT - Writer type compatible with impl::EnumEncoder.
      * @param writer - Destination writer or counting sink.
      * @param compress - Whether constrained values should be dint-condensed.
+     *   Ignored if \c sizeof(value_type)==1 and implicitly set to \c false.
      * @param append_terminate - Whether to append an explicit Terminate opcode.
      * @return WriterT& - The updated writer.
      */
@@ -59,6 +65,7 @@ namespace Constexpr {
       bool compress = false,
       bool append_terminate = false) const
     {
+      compress = compress && sizeof(value_type) > 1;
       writer.write_int(impl::storage_header_for_value_type<typename Settings::value_type>(compress));
 
       impl::EnumEncoder<Enum<Settings>, WriterT> encoder{ *this, writer, compress };

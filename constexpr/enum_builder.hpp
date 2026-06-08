@@ -393,6 +393,7 @@ namespace Constexpr {
       {
         auto const u_bitmask{ make_unsigned_equivalent(bitmask) };
         if (has_mask) {
+          assert(u_bitmask || !"Named bitmask cannot be 0");
           assert(is_subset_of(u_bitmask, scope.scope_bitmask()) || !"Named bitmask must be a subset of the parent scope_bitmask");
           assert(is_subset_of(value, u_bitmask) || !"Named value must be a subset of its command bitmask");
         } else {
@@ -432,6 +433,7 @@ namespace Constexpr {
         eEnumCommand format)
       {
         auto const u_bitmask{ make_unsigned_equivalent(bitmask) };
+        assert(u_bitmask || !"Numeric bitmask cannot be 0");
         assert(is_subset_of(u_bitmask, scope.scope_bitmask()) || !"Numeric bitmask must be a subset of the parent scope_bitmask");
         clear_implicit_named(scope);
 
@@ -479,6 +481,7 @@ namespace Constexpr {
         Conditional<typename D::value_type> conditional{};
         verify_group_bitmask(u_group_bitmask);
         assert(is_subset_of(u_group_bitmask, scope.scope_bitmask()) || !"group_bitmask must be a subset of the parent scope_bitmask");
+        assert(u_scope_bitmask || !"scope_bitmask cannot be 0");
         assert(is_subset_of(u_scope_bitmask, scope.scope_bitmask()) || !"scope_bitmask must be a subset of the parent scope_bitmask");
         conditional.group_bitmask = u_group_bitmask;
         conditional.bitmask = u_scope_bitmask;
