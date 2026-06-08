@@ -11,6 +11,7 @@
 #define CONSTEXPR_ENUM_CORE_HPP
 
 #include "enum_ir.hpp"
+#include <ostream>
 #include <variant>
 
 namespace Constexpr {

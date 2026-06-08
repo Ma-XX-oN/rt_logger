@@ -104,12 +104,12 @@ static_assert(kConstexprCondenseWorks);
 constexpr bool kConstexprExpandWorks{ []() constexpr {
   // LSB-packed bits should scatter back into the sparse-mask positions.
   bool const lsb_ok{
-    Constexpr::expand(kSparseMask, kSparsePackedLsb, true) == kSparseValue
+    Constexpr::expand<std::uint8_t>(kSparseMask, kSparsePackedLsb, true) == kSparseValue
   };
 
   // Offset-preserving packed bits should land in the same logical positions.
   bool const aligned_ok{
-    Constexpr::expand(kSparseMask, kSparsePackedAligned, false) == kSparseValue
+    Constexpr::expand<std::uint8_t>(kSparseMask, kSparsePackedAligned, false) == kSparseValue
   };
 
   return lsb_ok && aligned_ok;
@@ -128,7 +128,7 @@ constexpr bool kConstexprEnumSupportWorks{ []() constexpr {
   };
 
   bool const expand_ok{
-    Constexpr::expand(SparseEnumBits::Mask, kSparsePackedLsb, true)
+    Constexpr::expand<SparseEnumBits>(SparseEnumBits::Mask, kSparsePackedLsb, true)
       == SparseEnumBits::Value
   };
 
@@ -145,7 +145,7 @@ constexpr bool kConstexprIntegralReturnTypesMatchContract{ []() constexpr {
 
   // Expanding should restore the original integral type.
   bool const expand_type_ok{ std::is_same_v<
-    decltype(Constexpr::expand(kSparseMask, kSparsePackedLsb, true)),
+    decltype(Constexpr::expand<std::uint8_t>(kSparseMask, kSparsePackedLsb, true)),
     std::uint8_t
   > };
 
@@ -162,7 +162,7 @@ constexpr bool kConstexprEnumReturnTypesMatchContract{ []() constexpr {
 
   // Expanding should recover the enum type itself, not the storage type.
   bool const expand_type_ok{ std::is_same_v<
-    decltype(Constexpr::expand(SparseEnumBits::Mask, kSparsePackedLsb, true)),
+    decltype(Constexpr::expand<SparseEnumBits>(SparseEnumBits::Mask, kSparsePackedLsb, true)),
     SparseEnumBits
   > };
 
@@ -225,9 +225,9 @@ constexpr bool kConstexprEdgeBitScenariosWork{ []() constexpr {
       == kLeastBitPackedLsb32
     && Constexpr::condense(kLeastBitMask32, kLeastBitValue32, false)
       == kLeastBitPackedAligned32
-    && Constexpr::expand(kLeastBitMask32, kLeastBitPackedLsb32, true)
+    && Constexpr::expand<std::uint32_t>(kLeastBitMask32, kLeastBitPackedLsb32, true)
       == kLeastBitValue32
-    && Constexpr::expand(kLeastBitMask32, kLeastBitPackedAligned32, false)
+    && Constexpr::expand<std::uint32_t>(kLeastBitMask32, kLeastBitPackedAligned32, false)
       == kLeastBitValue32
   };
 
@@ -238,9 +238,9 @@ constexpr bool kConstexprEdgeBitScenariosWork{ []() constexpr {
       == kMostBitPackedLsb32
     && Constexpr::condense(kMostBitMask32, kMostBitValue32, false)
       == kMostBitPackedAligned32
-    && Constexpr::expand(kMostBitMask32, kMostBitPackedLsb32, true)
+    && Constexpr::expand<std::uint32_t>(kMostBitMask32, kMostBitPackedLsb32, true)
       == kMostBitValue32
-    && Constexpr::expand(kMostBitMask32, kMostBitPackedAligned32, false)
+    && Constexpr::expand<std::uint32_t>(kMostBitMask32, kMostBitPackedAligned32, false)
       == kMostBitValue32
   };
 
@@ -252,9 +252,9 @@ constexpr bool kConstexprEdgeBitScenariosWork{ []() constexpr {
       == kEdgeBitsPackedLsb32
     && Constexpr::condense(kEdgeBitsMask32, kEdgeBitsValue32, false)
       == kEdgeBitsPackedAligned32
-    && Constexpr::expand(kEdgeBitsMask32, kEdgeBitsPackedLsb32, true)
+    && Constexpr::expand<std::uint32_t>(kEdgeBitsMask32, kEdgeBitsPackedLsb32, true)
       == kEdgeBitsValue32
-    && Constexpr::expand(kEdgeBitsMask32, kEdgeBitsPackedAligned32, false)
+    && Constexpr::expand<std::uint32_t>(kEdgeBitsMask32, kEdgeBitsPackedAligned32, false)
       == kEdgeBitsValue32
   };
 
@@ -270,9 +270,9 @@ constexpr bool kConstexprWiderIntegralWidthsWork{ []() constexpr {
       == kWideSparsePackedLsb32
     && Constexpr::condense(kWideSparseMask32, kWideSparseValue32, false)
       == kWideSparsePackedAligned32
-    && Constexpr::expand(kWideSparseMask32, kWideSparsePackedLsb32, true)
+    && Constexpr::expand<std::uint32_t>(kWideSparseMask32, kWideSparsePackedLsb32, true)
       == kWideSparseValue32
-    && Constexpr::expand(kWideSparseMask32, kWideSparsePackedAligned32, false)
+    && Constexpr::expand<std::uint32_t>(kWideSparseMask32, kWideSparsePackedAligned32, false)
       == kWideSparseValue32
   };
 
@@ -283,9 +283,9 @@ constexpr bool kConstexprWiderIntegralWidthsWork{ []() constexpr {
       == kWideContiguousPackedLsb16
     && Constexpr::condense(kWideContiguousMask16, kWideContiguousValue16, false)
       == kWideContiguousPackedAligned16
-    && Constexpr::expand(kWideContiguousMask16, kWideContiguousPackedLsb16, true)
+    && Constexpr::expand<std::uint16_t>(kWideContiguousMask16, kWideContiguousPackedLsb16, true)
       == kWideContiguousValue16
-    && Constexpr::expand(kWideContiguousMask16, kWideContiguousPackedAligned16, false)
+    && Constexpr::expand<std::uint16_t>(kWideContiguousMask16, kWideContiguousPackedAligned16, false)
       == kWideContiguousValue16
   };
 
@@ -327,12 +327,12 @@ void expect_expand_after_condense_round_trip(T mask, T value)
 
   // First verify the path that packs the field down to bit 0.
   U const expanded_from_lsb{
-    as_unsigned(Constexpr::expand(mask, Constexpr::condense(mask, value, true), true))
+    as_unsigned(Constexpr::expand<T>(mask, Constexpr::condense(mask, value, true), true))
   };
 
   // Then verify the path that preserves the field's original offset.
   U const expanded_from_aligned{
-    as_unsigned(Constexpr::expand(mask, Constexpr::condense(mask, value, false), false))
+    as_unsigned(Constexpr::expand<T>(mask, Constexpr::condense(mask, value, false), false))
   };
 
   EXPECT_EQ(expected, expanded_from_lsb);
@@ -357,7 +357,7 @@ void expect_condense_after_expand_round_trip(
 )
 {
   // Expand the packed field into the positions selected by the mask first.
-  T const expanded{ Constexpr::expand(mask, packed, read_from_lsb) };
+  T const expanded{ Constexpr::expand<T>(mask, packed, read_from_lsb) };
 
   // Re-condensing should recover the original packed representation exactly.
   auto const recondensed{ Constexpr::condense(mask, expanded, read_from_lsb) };
@@ -400,14 +400,14 @@ TEST(MaskedBitsRuntime, CondensesSparseMaskAtOriginalOffset)
 TEST(MaskedBitsRuntime, ExpandsSparseMaskFromLsb)
 {
   // The packed field `0b101` should scatter back into mask bits 1, 2, and 4.
-  EXPECT_EQ(kSparseValue, Constexpr::expand(kSparseMask, kSparsePackedLsb, true));
+  EXPECT_EQ(kSparseValue, Constexpr::expand<std::uint8_t>(kSparseMask, kSparsePackedLsb, true));
 }
 
 // Offset-preserving packed bits should also scatter back to the masked layout.
 TEST(MaskedBitsRuntime, ExpandsSparseMaskFromOriginalOffset)
 {
   // The offset-preserving packed field should expand back to the same sparse layout.
-  EXPECT_EQ(kSparseValue, Constexpr::expand(kSparseMask, kSparsePackedAligned, false));
+  EXPECT_EQ(kSparseValue, Constexpr::expand<std::uint8_t>(kSparseMask, kSparsePackedAligned, false));
 }
 
 // Contiguous masks are the simple case: condense/expand should behave like shifts.
@@ -421,10 +421,10 @@ TEST(MaskedBitsRuntime, HandlesContiguousMasksAsBitShifts)
   );
 
   // Expanding those packed fields should put the same contiguous bits back.
-  EXPECT_EQ(kContiguousValue, Constexpr::expand(kContiguousMask, kContiguousPackedLsb, true));
+  EXPECT_EQ(kContiguousValue, Constexpr::expand<std::uint8_t>(kContiguousMask, kContiguousPackedLsb, true));
   EXPECT_EQ(
     kContiguousValue,
-    Constexpr::expand(kContiguousMask, kContiguousPackedAligned, false)
+    Constexpr::expand<std::uint8_t>(kContiguousMask, kContiguousPackedAligned, false)
   );
 }
 
@@ -446,11 +446,11 @@ TEST(MaskedBitsRuntime, HandlesLeastSignificantBitOnlyScenarios)
   // Both expand modes recover the same original value for this one-bit field.
   EXPECT_EQ(
     kLeastBitValue32,
-    Constexpr::expand(kLeastBitMask32, kLeastBitPackedLsb32, true)
+    Constexpr::expand<std::uint32_t>(kLeastBitMask32, kLeastBitPackedLsb32, true)
   );
   EXPECT_EQ(
     kLeastBitValue32,
-    Constexpr::expand(kLeastBitMask32, kLeastBitPackedAligned32, false)
+    Constexpr::expand<std::uint32_t>(kLeastBitMask32, kLeastBitPackedAligned32, false)
   );
 }
 
@@ -472,11 +472,11 @@ TEST(MaskedBitsRuntime, HandlesMostSignificantBitScenarios)
   // Expanding from either packed form should recover the original top-bit value.
   EXPECT_EQ(
     kMostBitValue32,
-    Constexpr::expand(kMostBitMask32, kMostBitPackedLsb32, true)
+    Constexpr::expand<std::uint32_t>(kMostBitMask32, kMostBitPackedLsb32, true)
   );
   EXPECT_EQ(
     kMostBitValue32,
-    Constexpr::expand(kMostBitMask32, kMostBitPackedAligned32, false)
+    Constexpr::expand<std::uint32_t>(kMostBitMask32, kMostBitPackedAligned32, false)
   );
 }
 
@@ -498,11 +498,11 @@ TEST(MaskedBitsRuntime, HandlesTopAndBottomBitScenarios)
   // Expanding the two-bit packed field should restore both edges of the word.
   EXPECT_EQ(
     kEdgeBitsValue32,
-    Constexpr::expand(kEdgeBitsMask32, kEdgeBitsPackedLsb32, true)
+    Constexpr::expand<std::uint32_t>(kEdgeBitsMask32, kEdgeBitsPackedLsb32, true)
   );
   EXPECT_EQ(
     kEdgeBitsValue32,
-    Constexpr::expand(kEdgeBitsMask32, kEdgeBitsPackedAligned32, false)
+    Constexpr::expand<std::uint32_t>(kEdgeBitsMask32, kEdgeBitsPackedAligned32, false)
   );
 }
 
@@ -524,11 +524,11 @@ TEST(MaskedBitsRuntime, HandlesWideSparseMasks)
   // Expanding either packed representation should restore the same sparse value.
   EXPECT_EQ(
     kWideSparseValue32,
-    Constexpr::expand(kWideSparseMask32, kWideSparsePackedLsb32, true)
+    Constexpr::expand<std::uint32_t>(kWideSparseMask32, kWideSparsePackedLsb32, true)
   );
   EXPECT_EQ(
     kWideSparseValue32,
-    Constexpr::expand(kWideSparseMask32, kWideSparsePackedAligned32, false)
+    Constexpr::expand<std::uint32_t>(kWideSparseMask32, kWideSparsePackedAligned32, false)
   );
 }
 
@@ -550,11 +550,11 @@ TEST(MaskedBitsRuntime, HandlesWideContiguousMasks)
   // Expanding either form should restore the original shifted nibble.
   EXPECT_EQ(
     kWideContiguousValue16,
-    Constexpr::expand(kWideContiguousMask16, kWideContiguousPackedLsb16, true)
+    Constexpr::expand<std::uint16_t>(kWideContiguousMask16, kWideContiguousPackedLsb16, true)
   );
   EXPECT_EQ(
     kWideContiguousValue16,
-    Constexpr::expand(kWideContiguousMask16, kWideContiguousPackedAligned16, false)
+    Constexpr::expand<std::uint16_t>(kWideContiguousMask16, kWideContiguousPackedAligned16, false)
   );
 }
 
@@ -571,7 +571,7 @@ TEST(MaskedBitsRuntime, SupportsSmallWidthEnums)
   );
 
   // Expand should return the enum type and preserve the original enumerator value.
-  SparseEnumBits const expanded{ Constexpr::expand(SparseEnumBits::Mask, kSparsePackedLsb, true) };
+  SparseEnumBits const expanded{ Constexpr::expand<SparseEnumBits>(SparseEnumBits::Mask, kSparsePackedLsb, true) };
   EXPECT_EQ(as_unsigned(SparseEnumBits::Value), as_unsigned(expanded));
 }
 
@@ -627,7 +627,7 @@ TEST(MaskedBitsFailure, RejectsZeroMasks)
 
   // Expand cannot decide where to scatter bits when the mask is zero.
   EXPECT_THROW(
-    (void)Constexpr::expand(std::uint8_t{ 0u }, std::uint8_t{ 1u }, true),
+    (void)Constexpr::expand<std::uint8_t>(std::uint8_t{ 0u }, std::uint8_t{ 1u }, true),
     std::invalid_argument
   );
 }

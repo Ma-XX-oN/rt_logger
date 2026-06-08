@@ -59,10 +59,11 @@ namespace Constexpr { namespace impl {
       /**
        * @brief Returns the root-scope bitmask with every bit enabled.
        *
-       * @return value_type - All-bits-set scope bitmask for \c value_type.
+       * @return unsigned_value_type - All-bits-set scope bitmask for \c
+       *   value_type.
        */
-      static constexpr value_type full_scope_bitmask() noexcept {
-        return static_cast<value_type>(static_cast<unsigned_value_type>(~unsigned_value_type{}));
+      static constexpr unsigned_value_type full_scope_bitmask() noexcept {
+        return ~unsigned_value_type{};
       }
 
       /**
@@ -132,13 +133,13 @@ namespace Constexpr { namespace impl {
        * @brief Renders one named command against the active scope bitmask.
        *
        * @param named - Named command to evaluate.
-       * @param scope_bitmask - Active scope bitmask for the current command list.
+       * @param scope_bitmask - Active scope bitmask (unsigned) for the current command list.
        */
-      void render_named(Named<value_type> const& named, value_type scope_bitmask) {
+      void render_named(Named<value_type> const& named, unsigned_value_type scope_bitmask) {
         auto const effective_bitmask{
           named.has_mask
-            ? make_unsigned_equivalent(named.mask)
-            : make_unsigned_equivalent(scope_bitmask)
+            ? named.mask
+            : scope_bitmask
         };
         auto const current_value{ make_unsigned_equivalent(m_value) };
 
@@ -164,13 +165,13 @@ namespace Constexpr { namespace impl {
        * @brief Renders one conditional command.
        *
        * @param conditional - Conditional command to evaluate.
-       * @param scope_bitmask - Parent scope bitmask. Present for signature symmetry.
+       * @param scope_bitmask - Parent scope bitmask (unsigned); present for signature symmetry.
        */
-      void render_conditional(Conditional<value_type> const& conditional, value_type scope_bitmask) {
+      void render_conditional(Conditional<value_type> const& conditional, unsigned_value_type scope_bitmask) {
         (void)scope_bitmask;
 
         bool const condition_met{
-          (make_unsigned_equivalent(m_value) & make_unsigned_equivalent(conditional.group_bitmask)) != 0u
+          (make_unsigned_equivalent(m_value) & conditional.group_bitmask) != 0u
         };
         if (condition_met) {
           if (conditional.true_group_id) {
@@ -190,9 +191,9 @@ namespace Constexpr { namespace impl {
        * @brief Renders one linked list of stored command nodes.
        *
        * @param cmds_id - First command-list node id.
-       * @param scope_bitmask - Active scope bitmask for that command list.
+       * @param scope_bitmask - Active scope bitmask (unsigned) for that command list.
        */
-      void render_cmds(item_id_t cmds_id, value_type scope_bitmask) {
+      void render_cmds(item_id_t cmds_id, unsigned_value_type scope_bitmask) {
         for (item_id_t current_cmds_id{ cmds_id }; current_cmds_id != 0u;) {
           auto const& cmds{ m_enum->template item<Cmds<value_type>>(current_cmds_id) };
           if (auto const* named{ m_enum->template item_if<Named<value_type>>(cmds.command_id) }) {

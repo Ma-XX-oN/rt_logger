@@ -100,7 +100,7 @@ namespace Constexpr {
       item_id_t named_id{};
       item_id_t last_pair_id{};
       bool has_mask{};
-      E mask{};
+      unsigned_equivalent_t<E> mask{};
     };
 
     /**
@@ -246,12 +246,13 @@ namespace Constexpr {
        * \c make_unsigned_equivalent.
        *
        * @tparam T - Value type (integral or enum).
+       * @tparam U - Mask type (integral or enum); may differ from \p T.
        * @param value - Candidate subset value.
        * @param mask - Superset mask to test against.
        * @return bool - \c true when every set bit in \p value is also set in \p mask.
        */
-      template <typename T>
-      static constexpr bool is_subset_of(T value, T mask) noexcept {
+      template <typename T, typename U>
+      static constexpr bool is_subset_of(T value, U mask) noexcept {
         auto const uv{ make_unsigned_equivalent(value) };
         auto const um{ make_unsigned_equivalent(mask) };
         return (uv & um) == uv;
@@ -347,7 +348,7 @@ namespace Constexpr {
       static constexpr item_id_t ensure_named_target(
         D& scope,
         bool has_mask,
-        typename D::value_type bitmask)
+        unsigned_equivalent_t<typename D::value_type> bitmask)
       {
         auto& state{ scope.command_state() };
         auto& implicit{ state.implicit_named };
@@ -390,16 +391,17 @@ namespace Constexpr {
         typename D::value_type value,
         std::string_view name)
       {
+        auto const u_bitmask{ make_unsigned_equivalent(bitmask) };
         if (has_mask) {
-          assert(is_subset_of(bitmask, scope.scope_bitmask()) || !"Named bitmask must be a subset of the parent scope_bitmask");
-          assert(is_subset_of(value, bitmask) || !"Named value must be a subset of its command bitmask");
+          assert(is_subset_of(u_bitmask, scope.scope_bitmask()) || !"Named bitmask must be a subset of the parent scope_bitmask");
+          assert(is_subset_of(value, u_bitmask) || !"Named value must be a subset of its command bitmask");
         } else {
           assert(is_subset_of(value, scope.scope_bitmask()) || !"Named value must be a subset of the parent scope_bitmask");
         }
 
         auto& enum_def{ scope.enum_ref() };
         auto& implicit{ scope.command_state().implicit_named };
-        item_id_t const named_id{ ensure_named_target(scope, has_mask, bitmask) };
+        item_id_t const named_id{ ensure_named_target(scope, has_mask, u_bitmask) };
         verify_unique_named_value(scope, named_id, value);
         string_id_t const name_id{ enum_def.add_string(name) };
         item_id_t const pair_id{ enum_def.add_item(Pairs<typename D::value_type>{ value, name_id, {} }) };
@@ -429,13 +431,14 @@ namespace Constexpr {
         std::string_view name,
         eEnumCommand format)
       {
-        assert(is_subset_of(bitmask, scope.scope_bitmask()) || !"Numeric bitmask must be a subset of the parent scope_bitmask");
+        auto const u_bitmask{ make_unsigned_equivalent(bitmask) };
+        assert(is_subset_of(u_bitmask, scope.scope_bitmask()) || !"Numeric bitmask must be a subset of the parent scope_bitmask");
         clear_implicit_named(scope);
 
         auto& enum_def{ scope.enum_ref() };
         string_id_t const name_id{ enum_def.add_string(name) };
         item_id_t const numeric_id{
-          enum_def.add_item(Constexpr::impl::Numeric<typename D::value_type>{ bitmask, format, name_id })
+          enum_def.add_item(Constexpr::impl::Numeric<typename D::value_type>{ u_bitmask, format, name_id })
         };
         append_command_node(scope, numeric_id);
       }
@@ -464,6 +467,9 @@ namespace Constexpr {
       {
         clear_implicit_named(scope);
 
+        auto const u_group_bitmask{ make_unsigned_equivalent(group_bitmask) };
+        auto const u_scope_bitmask{ make_unsigned_equivalent(scope_bitmask) };
+
         auto& enum_def{ scope.enum_ref() };
         string_id_t const group_name_id{
           has_group_name ? enum_def.add_string(group_name) : string_id_t{}
@@ -471,11 +477,11 @@ namespace Constexpr {
         item_id_t const group_id{ enum_def.add_item(Group<typename D::value_type>{ group_name_id, {} }) };
 
         Conditional<typename D::value_type> conditional{};
-        verify_group_bitmask(group_bitmask);
-        assert(is_subset_of(group_bitmask, scope.scope_bitmask()) || !"group_bitmask must be a subset of the parent scope_bitmask");
-        assert(is_subset_of(scope_bitmask, scope.scope_bitmask()) || !"scope_bitmask must be a subset of the parent scope_bitmask");
-        conditional.group_bitmask = group_bitmask;
-        conditional.bitmask = scope_bitmask;
+        verify_group_bitmask(u_group_bitmask);
+        assert(is_subset_of(u_group_bitmask, scope.scope_bitmask()) || !"group_bitmask must be a subset of the parent scope_bitmask");
+        assert(is_subset_of(u_scope_bitmask, scope.scope_bitmask()) || !"scope_bitmask must be a subset of the parent scope_bitmask");
+        conditional.group_bitmask = u_group_bitmask;
+        conditional.bitmask = u_scope_bitmask;
         if (negate_first) {
           conditional.false_group_id = group_id;
         } else {
@@ -484,7 +490,7 @@ namespace Constexpr {
 
         item_id_t const conditional_id{ enum_def.add_item(conditional) };
         append_command_node(scope, conditional_id);
-        return IfScope<D>{ scope, conditional_id, group_id, scope_bitmask };
+        return IfScope<D>{ scope, conditional_id, group_id, u_scope_bitmask };
       }
     };
 
@@ -498,7 +504,7 @@ namespace Constexpr {
       Parent& m_parent;
       item_id_t m_conditional_id{};
       item_id_t m_group_id{};
-      typename Parent::value_type m_scope_bitmask{};
+      unsigned_equivalent_t<typename Parent::value_type> m_scope_bitmask{};
       CommandScopeState<typename Parent::value_type> m_state{};
 
       template <typename Derived>
@@ -591,6 +597,7 @@ namespace Constexpr {
 
     public:
       using value_type = typename Parent::value_type;
+      using unsigned_value_type = unsigned_equivalent_t<value_type>;
       using enum_type = typename Parent::enum_type;
       using settings_type = typename Parent::settings_type;
 
@@ -600,12 +607,13 @@ namespace Constexpr {
        * @param parent - Parent scope snapshot to keep extending.
        * @param conditional_id - Stored conditional command id.
        * @param group_id - Stored group id for the active branch.
+       * @param scope_bitmask - Active scope bitmask (unsigned) constraining values inside this branch.
        */
       constexpr IfScope(
         Parent& parent,
         item_id_t conditional_id,
         item_id_t group_id,
-        typename Parent::value_type scope_bitmask) noexcept
+        unsigned_value_type scope_bitmask) noexcept
       : m_parent{ parent }
       , m_conditional_id{ conditional_id }
       , m_group_id{ group_id }
@@ -617,9 +625,9 @@ namespace Constexpr {
       /**
        * @brief Returns the active scope bitmask constraining values in this branch.
        *
-       * @return value_type - Scope bitmask for this if branch.
+       * @return unsigned_value_type - Scope bitmask for this if branch.
        */
-      constexpr value_type scope_bitmask() const noexcept { return m_scope_bitmask; }
+      constexpr unsigned_value_type scope_bitmask() const noexcept { return m_scope_bitmask; }
 
       /**
        * @brief Switch this conditional from its if branch to its else branch.
@@ -748,7 +756,7 @@ namespace Constexpr {
       Parent& m_parent;
       item_id_t m_conditional_id{};
       item_id_t m_group_id{};
-      typename Parent::value_type m_scope_bitmask{};
+      unsigned_equivalent_t<typename Parent::value_type> m_scope_bitmask{};
       CommandScopeState<typename Parent::value_type> m_state{};
 
       template <typename Derived>
@@ -841,6 +849,7 @@ namespace Constexpr {
 
     public:
       using value_type = typename Parent::value_type;
+      using unsigned_value_type = unsigned_equivalent_t<value_type>;
       using enum_type = typename Parent::enum_type;
       using settings_type = typename Parent::settings_type;
 
@@ -850,12 +859,13 @@ namespace Constexpr {
        * @param parent - Parent scope snapshot to keep extending.
        * @param conditional_id - Stored conditional command id.
        * @param group_id - Stored group id for the active else branch.
+       * @param scope_bitmask - Active scope bitmask (unsigned) constraining values inside this branch.
        */
       constexpr ElseScope(
         Parent& parent,
         item_id_t conditional_id,
         item_id_t group_id,
-        typename Parent::value_type scope_bitmask) noexcept
+        unsigned_value_type scope_bitmask) noexcept
       : m_parent{ parent }
       , m_conditional_id{ conditional_id }
       , m_group_id{ group_id }
@@ -867,9 +877,9 @@ namespace Constexpr {
       /**
        * @brief Returns the active scope bitmask constraining values in this branch.
        *
-       * @return value_type - Scope bitmask for this else branch.
+       * @return unsigned_value_type - Scope bitmask for this else branch.
        */
-      constexpr value_type scope_bitmask() const noexcept { return m_scope_bitmask; }
+      constexpr unsigned_value_type scope_bitmask() const noexcept { return m_scope_bitmask; }
 
       /**
        * @brief Finish this else scope and return to the exact parent scope type.
@@ -1045,6 +1055,7 @@ namespace Constexpr {
     using settings_type = Settings;
     using enum_type = Enum<Settings>;
     using value_type = typename Settings::value_type;
+    using unsigned_value_type = unsigned_equivalent_t<value_type>;
 
     /**
      * @brief Construct an empty enum builder.
@@ -1067,10 +1078,10 @@ namespace Constexpr {
      *
      * The root scope has no parent constraint, so all bits are valid.
      *
-     * @return value_type - All-ones mask.
+     * @return unsigned_value_type - All-ones mask.
      */
-    constexpr value_type scope_bitmask() const noexcept {
-      return static_cast<value_type>(~make_unsigned_equivalent(value_type{}));
+    constexpr unsigned_value_type scope_bitmask() const noexcept {
+      return ~unsigned_value_type{};
     }
 
     /**

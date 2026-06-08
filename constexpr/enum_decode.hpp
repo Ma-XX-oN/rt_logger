@@ -11,6 +11,7 @@
 #define CONSTEXPR_ENUM_DECODE_HPP
 
 #include "enum_core.hpp"
+#include "ThrowNoThrow.hpp"
 
 namespace Constexpr { namespace impl {
 
@@ -38,10 +39,10 @@ namespace Constexpr { namespace impl {
        * @brief Returns the all-bits-set root scope for the configured value
        *   type.
        *
-       * @return value_type - Root scope bitmask.
+       * @return unsigned_value_type - Root scope bitmask.
        */
-      static constexpr value_type full_scope_bitmask() noexcept {
-        return static_cast<value_type>(static_cast<unsigned_value_type>(~unsigned_value_type{}));
+      static constexpr unsigned_value_type full_scope_bitmask() noexcept {
+        return ~unsigned_value_type{};
       }
 
       /**
@@ -93,13 +94,12 @@ namespace Constexpr { namespace impl {
        * @brief Returns whether a value is a subset of its parent scope bitmask.
        *
        * @param value - Candidate constrained value.
-       * @param scope_bitmask - Parent scope bitmask.
+       * @param scope_bitmask - Parent scope bitmask (unsigned).
        * @return bool - \c true when \p value is fully contained in \p scope_bitmask.
        */
-      static constexpr bool is_subset_of_scope(value_type value, value_type scope_bitmask) noexcept {
+      static constexpr bool is_subset_of_scope(value_type value, unsigned_value_type scope_bitmask) noexcept {
         auto const value_bits{ make_unsigned_equivalent(value) };
-        auto const scope_bits{ make_unsigned_equivalent(scope_bitmask) };
-        return (value_bits & scope_bits) == value_bits;
+        return (value_bits & scope_bitmask) == value_bits;
       }
 
       /**
@@ -107,10 +107,10 @@ namespace Constexpr { namespace impl {
        *   parent scope.
        *
        * @param value - Candidate constrained value.
-       * @param scope_bitmask - Parent scope bitmask.
+       * @param scope_bitmask - Parent scope bitmask (unsigned).
        * @throws EnumParseInvalidStructure when \p value exceeds \p scope_bitmask.
        */
-      static constexpr void verify_scope_subset(value_type value, value_type scope_bitmask) {
+      static constexpr void verify_scope_subset(value_type value, unsigned_value_type scope_bitmask) {
         if (!is_subset_of_scope(value, scope_bitmask)) {
           throw EnumParseInvalidStructure("Constrained value exceeds the parent scope bitmask.");
         }
@@ -236,15 +236,15 @@ namespace Constexpr { namespace impl {
       /**
        * @brief Reads in the scoped group_shift and return the corresponding bitmask.
        *
-       * @param scope_bitmask - Parent scope bitmask that constrains the value.
-       * @return value_type - Decoded constrained value.
+       * @param scope_bitmask - Parent scope bitmask that constrains the value (unsigned).
+       * @return unsigned_value_type - Decoded single-bit group mask.
        */
-      constexpr value_type read_scoped_group_mask_value(value_type scope_bitmask) {
+      constexpr unsigned_value_type read_scoped_group_mask_value(unsigned_value_type scope_bitmask) {
         auto const group_shift{ read_fixed_width_integer<std::uint8_t>() };
         if (group_shift >= std::numeric_limits<unsigned_value_type>::digits) {
           throw EnumParseInvalidStructure("group_shift value exceeds number of bits in value_type.");
         }
-        value_type const group_mask{ static_cast<value_type>(1 << group_shift) };
+        auto const group_mask{ static_cast<unsigned_value_type>(unsigned_value_type{1} << group_shift) };
         auto const recon{ scope_bitmask & group_mask };
         if (recon != group_mask) {
           throw EnumParseInvalidStructure("Bit value is not representable under the parent scope bitmask.");
@@ -255,10 +255,10 @@ namespace Constexpr { namespace impl {
       /**
        * @brief Reads one constrained value using the stream's compression mode.
        *
-       * @param scope_bitmask - Parent scope bitmask that constrains the value.
+       * @param scope_bitmask - Parent scope bitmask that constrains the value (unsigned).
        * @return value_type - Decoded constrained value.
        */
-      constexpr value_type read_scoped_value(value_type scope_bitmask) {
+      constexpr value_type read_scoped_value(unsigned_value_type scope_bitmask) {
         if (!m_compress) {
           auto const raw{ read_fixed_width_integer<underlying_value_type>() };
           value_type const value{ static_cast<value_type>(raw) };
@@ -267,12 +267,25 @@ namespace Constexpr { namespace impl {
         }
 
         auto const condensed{ read_dint_integer<unsigned_value_type>() };
-        value_type const expanded{ expand(scope_bitmask, condensed, true) };
+        value_type const expanded{ expand<value_type>(scope_bitmask, condensed, true) };
         auto const recon{ make_unsigned_equivalent(condense(scope_bitmask, expanded, true)) };
         if (recon != condensed) {
           throw EnumParseInvalidStructure("Condensed value is not representable under the parent scope bitmask.");
         }
         return expanded;
+      }
+
+      /**
+       * @brief Reads one constrained bitmask using the stream's compression mode.
+       *
+       * Same wire format as \c read_scoped_value but returns an unsigned result
+       * for storage in mask fields.
+       *
+       * @param scope_bitmask - Parent scope bitmask that constrains the value (unsigned).
+       * @return unsigned_value_type - Decoded constrained bitmask.
+       */
+      constexpr unsigned_value_type read_scoped_bitmask(unsigned_value_type scope_bitmask) {
+        return make_unsigned_equivalent(read_scoped_value(scope_bitmask));
       }
 
       /**
@@ -325,8 +338,8 @@ namespace Constexpr { namespace impl {
        *   pair append.
        * @param last_pair_id - Tail pair id for the named command being built.
        * @param has_mask - Whether the named command owns a command-local mask.
-       * @param command_mask - Stored command-local bitmask when \p has_mask is
-       *   true.
+       * @param command_mask - Stored command-local bitmask (unsigned) when \p
+       *   has_mask is true.
        * @param value - Decoded pair value.
        * @param name_id - Stored string id for the pair name.
        */
@@ -334,7 +347,7 @@ namespace Constexpr { namespace impl {
         item_id_t& named_id,
         item_id_t& last_pair_id,
         bool has_mask,
-        value_type command_mask,
+        unsigned_value_type command_mask,
         value_type value,
         string_id_t name_id)
       {
@@ -419,16 +432,16 @@ namespace Constexpr { namespace impl {
        * @param pair_scope_bitmask - Active bitmask for the pair values.
        * @param has_mask - Whether the resulting named command carries a
        *   command-local bitmask.
-       * @param command_mask - Stored command-local bitmask when \p has_mask is
-       *   true.
+       * @param command_mask - Stored command-local bitmask (unsigned) when \p
+       *   has_mask is true.
        * @return item_id_t - Stored named-command id, or zero when the branch is
        *   empty.
        */
       constexpr item_id_t parse_pair_branch(
         std::size_t initial_count,
-        value_type pair_scope_bitmask,
+        unsigned_value_type pair_scope_bitmask,
         bool has_mask,
-        value_type command_mask)
+        unsigned_value_type command_mask)
       {
         item_id_t named_id{};
         item_id_t last_pair_id{};
@@ -461,7 +474,7 @@ namespace Constexpr { namespace impl {
        * @return item_id_t - Stored head command-list id, or zero when the
        *   branch is empty.
        */
-      constexpr item_id_t parse_command_branch(std::size_t initial_count, value_type scope_bitmask) {
+      constexpr item_id_t parse_command_branch(std::size_t initial_count, unsigned_value_type scope_bitmask) {
         item_id_t first_cmd_id{};
         item_id_t last_cmd_id{};
 
@@ -505,7 +518,7 @@ namespace Constexpr { namespace impl {
        * @return item_id_t - Stored else-group id, or zero when no else branch
        *   follows.
        */
-      constexpr item_id_t parse_optional_else_group(value_type scope_bitmask) {
+      constexpr item_id_t parse_optional_else_group(unsigned_value_type scope_bitmask) {
         if (at_end() || peek_opcode() != eEnumCommand::Else) {
           return {};
         }
@@ -549,12 +562,12 @@ namespace Constexpr { namespace impl {
        * @param scope_bitmask - Active parent scope bitmask.
        * @return item_id_t - Stored Named command id.
        */
-      constexpr item_id_t parse_named_command(std::uint8_t opcode, value_type scope_bitmask) {
+      constexpr item_id_t parse_named_command(std::uint8_t opcode, unsigned_value_type scope_bitmask) {
         bool const has_bitmask{ (opcode & static_cast<std::uint8_t>(eEnumCommand::fHasBitmask)) != 0u };
-        value_type const command_mask{
-          has_bitmask ? read_scoped_value(scope_bitmask) : value_type{}
+        unsigned_value_type const command_mask{
+          has_bitmask ? read_scoped_bitmask(scope_bitmask) : unsigned_value_type{}
         };
-        value_type const pair_scope_bitmask{ has_bitmask ? command_mask : scope_bitmask };
+        unsigned_value_type const pair_scope_bitmask{ has_bitmask ? command_mask : scope_bitmask };
         item_id_t const named_id{
           parse_pair_branch(
             decode_count_plus_one(opcode, static_cast<std::uint8_t>(eEnumCommand::mCountMedium)),
@@ -575,9 +588,9 @@ namespace Constexpr { namespace impl {
        * @param scope_bitmask - Active parent scope bitmask.
        * @return item_id_t - Stored Numeric command id.
        */
-      constexpr item_id_t parse_numeric_command(std::uint8_t opcode, value_type scope_bitmask) {
+      constexpr item_id_t parse_numeric_command(std::uint8_t opcode, unsigned_value_type scope_bitmask) {
         validate_numeric_opcode(opcode);
-        value_type const bitmask{ read_scoped_value(scope_bitmask) };
+        unsigned_value_type const bitmask{ read_scoped_bitmask(scope_bitmask) };
         string_id_t const name_id{ store_string(read_c_string_view()) };
         eEnumCommand const format{
           static_cast<eEnumCommand>(opcode & static_cast<std::uint8_t>(
@@ -595,14 +608,14 @@ namespace Constexpr { namespace impl {
        * @param scope_bitmask - Active parent scope bitmask.
        * @return item_id_t - Stored Conditional command id.
        */
-      constexpr item_id_t parse_conditional_command(std::uint8_t opcode, value_type scope_bitmask) {
+      constexpr item_id_t parse_conditional_command(std::uint8_t opcode, unsigned_value_type scope_bitmask) {
         eEnumCommand const kind{
           static_cast<eEnumCommand>(opcode & static_cast<std::uint8_t>(eEnumCommand::mOpCode))
         };
 
-        value_type const group_bitmask{ read_scoped_group_mask_value(scope_bitmask) };
+        unsigned_value_type const group_bitmask{ read_scoped_group_mask_value(scope_bitmask) };
         verify_group_bitmask(group_bitmask);
-        value_type const branch_scope_bitmask{ read_scoped_value(scope_bitmask) };
+        unsigned_value_type const branch_scope_bitmask{ read_scoped_bitmask(scope_bitmask) };
         string_id_t const group_name_id{
           (opcode & static_cast<std::uint8_t>(eEnumCommand::fHasGroupName)) != 0u
             ? store_string(read_c_string_view())
@@ -677,7 +690,7 @@ namespace Constexpr { namespace impl {
        * @param scope_bitmask - Active parent scope bitmask.
        * @return item_id_t - Stored command item id.
        */
-      constexpr item_id_t parse_command(value_type scope_bitmask) {
+      constexpr item_id_t parse_command(unsigned_value_type scope_bitmask) {
         std::uint8_t const opcode{ read_byte() };
         switch (static_cast<eEnumCommand>(opcode & static_cast<std::uint8_t>(eEnumCommand::mOpCode))) {
         case eEnumCommand::Named:

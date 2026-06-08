@@ -46,7 +46,7 @@ namespace Constexpr {
 } // namespace Constexpr
 
 template<>
-struct BitwiseOps<Constexpr::eIntFmt> : std::true_type {};
+struct enable_bitwise_ops<Constexpr::eIntFmt> : std::true_type {};
 
 namespace Constexpr {
 namespace impl {

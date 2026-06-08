@@ -10,8 +10,8 @@
 #ifndef CONSTEXPR_ENUM_ANY_HPP
 #define CONSTEXPR_ENUM_ANY_HPP
 
-#include "enum_render.hpp"
 #include "enum_builder.hpp"
+#include <utility>
 
 namespace Constexpr {
 

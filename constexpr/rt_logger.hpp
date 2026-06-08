@@ -394,7 +394,7 @@ enum eType : uint8_t {
 };
 
 template <>
-struct BitwiseOps<eType> : std::true_type {
+struct enable_bitwise_ops<eType> : std::true_type {
 };
 
 /**
@@ -422,7 +422,7 @@ enum eFmt0 : uint8_t {
 };
 
 template <>
-struct BitwiseOps<eFmt0> : std::true_type {
+struct enable_bitwise_ops<eFmt0> : std::true_type {
 };
 
 /**
@@ -462,7 +462,7 @@ enum eFmt1 : uint8_t {
 };
 
 template <>
-struct BitwiseOps<eFmt1> : std::true_type {
+struct enable_bitwise_ops<eFmt1> : std::true_type {
 };
 
 enum eFmtLetter : char {
@@ -502,7 +502,7 @@ enum eFmtLetter : char {
 };
 
 template<>
-struct BitwiseOps<eFmtLetter> : std::true_type {
+struct enable_bitwise_ops<eFmtLetter> : std::true_type {
 };
 
 // template<

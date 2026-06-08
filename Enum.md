@@ -263,7 +263,7 @@ enum class ePacketState : std::uint8_t {
 
 // enable bitwise operators
 template<>
-struct BitwiseOps<ePacketState> : std::true_type {};
+struct enable_bitwise_ops<ePacketState> : std::true_type {};
 
 auto PacketDesc = Constexpr::build_enum_description<Constexpr::EnumSettings<ePacketState>>()
   .If(ePacketState::fPrimary, ePacketState::mKindMask, "primary")

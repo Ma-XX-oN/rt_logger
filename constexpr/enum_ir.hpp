@@ -14,12 +14,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <ostream>
 #include <stdexcept>
-#include <string>
 #include <string_view>
 #include <type_traits>
-#include <utility>
 #include <variant>
 
 #include "masked_bits.hpp"
@@ -28,7 +25,6 @@
 #include "string.hpp"
 #include "type_traits.hpp"
 #include "heap.hpp"
-#include "ThrowNoThrow.hpp"
 
 namespace Constexpr {
 
@@ -510,13 +506,13 @@ using eEnumStorageType = eEnumStorageType_ns::eEnumStorageType;
 } // namespace Constexpr
 
 template <>
-struct BitwiseOps<Constexpr::eEnumCommand> : std::true_type {};
+struct enable_bitwise_ops<Constexpr::eEnumCommand> : std::true_type {};
 
 template <>
-struct BitwiseOps<Constexpr::eEnumStorageType> : std::true_type {};
+struct enable_bitwise_ops<Constexpr::eEnumStorageType> : std::true_type {};
 
 template <>
-struct BitwiseOps<Constexpr::impl::eBlockType> : std::true_type {};
+struct enable_bitwise_ops<Constexpr::impl::eBlockType> : std::true_type {};
 
 // What we need:
 //
@@ -750,15 +746,15 @@ namespace Constexpr {
 
     template <typename E>
     struct ScopeData {
-      E scope_bitmask{ static_cast<E>(-1) };
+      unsigned_equivalent_t<E> scope_bitmask{ std::numeric_limits<unsigned_equivalent_t<E>>::max() };
       int remaining_items_allowed_in_block{ -1 }; // Negative means the current scope has no block-local limit.
 
       /**
-       * @brief Narrows the active scope bitmask.
+       * @brief Validates that one bitmask is a subset of the active scope bitmask.
        *
-       * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
+       * @param new_bitmask - Candidate bitmask that must remain inside the current scope.
        */
-      constexpr void verify_scope_bitmask([[maybe_unused]] E new_bitmask) {
+      constexpr void verify_scope_bitmask([[maybe_unused]] unsigned_equivalent_t<E> new_bitmask) {
         assert((scope_bitmask & new_bitmask) == new_bitmask || !"new_bitmask must be a subset of the scope_bitmask");
       }
 
@@ -767,7 +763,7 @@ namespace Constexpr {
        *
        * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
        */
-      constexpr void set_scope_bitmask(E new_bitmask) {
+      constexpr void set_scope_bitmask(unsigned_equivalent_t<E> new_bitmask) {
         verify_scope_bitmask(new_bitmask);
         scope_bitmask = new_bitmask;
       }
@@ -783,6 +779,7 @@ namespace Constexpr {
     public:
       using enum_type = EnumT;
       using value_type = typename EnumT::value_type;
+      using unsigned_value_type = unsigned_equivalent_t<value_type>;
       using writer_type = WriterT;
       using cursor_type = typename writer_type::cursor_type;
 
@@ -860,18 +857,18 @@ namespace Constexpr {
       /**
        * @brief Returns the current scope bitmask.
        *
-       * @return value_type - Current scope bitmask.
+       * @return unsigned_value_type - Current scope bitmask.
        */
-      constexpr value_type scope_bitmask() const noexcept {
+      constexpr unsigned_value_type scope_bitmask() const noexcept {
         return m_scope.scope_bitmask;
       }
 
       /**
-       * @brief Narrows the current scope bitmask.
+       * @brief Validates that one bitmask is a subset of the active scope bitmask.
        *
-       * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
+       * @param new_bitmask - Candidate bitmask that must remain inside the current scope.
        */
-      constexpr void verify_scope_bitmask(value_type new_bitmask) {
+      constexpr void verify_scope_bitmask(unsigned_value_type new_bitmask) {
         m_scope.verify_scope_bitmask(new_bitmask);
       }
 
@@ -880,7 +877,7 @@ namespace Constexpr {
        *
        * @param new_bitmask - Replacement bitmask that must remain inside the current scope.
        */
-      constexpr void set_scope_bitmask(value_type new_bitmask) {
+      constexpr void set_scope_bitmask(unsigned_value_type new_bitmask) {
         m_scope.set_scope_bitmask(new_bitmask);
       }
 
@@ -978,17 +975,17 @@ namespace Constexpr {
       /**
        * @brief Encodes a scoped value, compressing it when this encoder is configured to do so.
        *
-       * @tparam T - Value type.
+       * @tparam T - Value type (enum or integral).
        * @param value - Value to encode.
-       * @param scope_bitmask - Active scope bitmask for validation and condensation.
+       * @param scope_bitmask - Active scope bitmask for validation and condensation (unsigned).
        */
       template <typename T>
-      constexpr void encode_int(T value, T scope_bitmask) {
-        assert((value & scope_bitmask) == value || !"value must be a subset of scope_bitmask");
+      constexpr void encode_int(T value, unsigned_equivalent_t<T> scope_bitmask) {
+        assert((make_unsigned_equivalent(value) & scope_bitmask) == make_unsigned_equivalent(value)
+          || !"value must be a subset of scope_bitmask");
         if (m_compress) {
           assert(sizeof(T) > 1 || !"Can't compress a type that has a byte length of 1.");
-          auto const mask { make_unsigned_equivalent(scope_bitmask) };
-          auto const cvalue { condense(mask, make_unsigned_equivalent(value), true) };
+          auto const cvalue { condense(scope_bitmask, make_unsigned_equivalent(value), true) };
           m_writer->write_dint(cvalue);
         } else if constexpr (std::is_enum<T>::value) {
           using UT = typename std::underlying_type<T>::type;
@@ -1121,7 +1118,7 @@ namespace Constexpr {
     template <typename E>
     struct Named {
       bool has_mask{};
-      E mask{};
+      unsigned_equivalent_t<E> mask{};
       item_id_t pairs_id{}; // Type:  Pairs<E>
       // item_id_t last_pairs_id{}; // optimisation
 
@@ -1176,7 +1173,7 @@ namespace Constexpr {
 
     template <typename E>
     struct Numeric {
-      E mask{};
+      unsigned_equivalent_t<E> mask{};
       eEnumCommand format{};
       string_id_t name_id{};
 
@@ -1243,8 +1240,8 @@ namespace Constexpr {
 
     template <typename E>
     struct Conditional {
-      E group_bitmask{};
-      E bitmask{};
+      unsigned_equivalent_t<E> group_bitmask{};
+      unsigned_equivalent_t<E> bitmask{};
       item_id_t true_group_id{};  // Type: Group<E> AT LEAST ONE MUST BE SPECIFIED, OR NO CONDITIONAL SHALL EXIST!
       item_id_t false_group_id{}; // Type: Group<E> AT LEAST ONE MUST BE SPECIFIED, OR NO CONDITIONAL SHALL EXIST!
 
@@ -1498,22 +1495,25 @@ namespace Constexpr {
     template <typename UInt>
     constexpr std::make_signed_t<UInt> sign_extend(UInt value, std::size_t sign_bit_index) {
       static_assert(std::is_unsigned_v<UInt>, "sign_extend requires an unsigned integer type.");
-
       std::size_t const digits{ std::numeric_limits<UInt>::digits };
-      std::size_t const width{ sign_bit_index + 1u };
-      UInt const sign_bit{ static_cast<UInt>(UInt{ 1u } << sign_bit_index) };
-      if ((value & sign_bit) == 0u) {
-        return static_cast<std::make_signed_t<UInt>>(value);
-      }
+      assert(sign_bit_index < digits || !"Sign bit exceeds value's bit positions.");
 
+      std::size_t const width{ sign_bit_index + 1u };
       UInt const width_mask{
         width >= digits
-          ? static_cast<UInt>(~UInt{})
+          ? std::numeric_limits<UInt>::max()
           : static_cast<UInt>((UInt{ 1u } << width) - 1u)
       };
-      return static_cast<std::make_signed_t<UInt>>(value | static_cast<UInt>(~width_mask));
-    }
 
+      UInt const sign_bit{ static_cast<UInt>(UInt{ 1u } << sign_bit_index) };
+      if ((value & sign_bit) == 0u) {
+        return static_cast<std::make_signed_t<UInt>>(value & width_mask);
+      }
+
+      return bit_cast<std::make_signed_t<UInt>>(
+        static_cast<UInt>(value | static_cast<UInt>(~width_mask))
+      );
+    }
   } // namespace impl
 
 } // namespace Constexpr
