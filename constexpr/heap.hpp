@@ -17,6 +17,7 @@
 #include <string_view>
 #include <array>
 #include <cassert>
+#include <variant>
 #include "constexpr/string.hpp"
 
 namespace Constexpr {

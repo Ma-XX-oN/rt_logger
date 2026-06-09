@@ -405,7 +405,6 @@ namespace Constexpr {
   public:
     using value_type = typename enum_type::value_type;
     using constexpr_view_type = ConstexprEnumValueView<EnumDef>;
-    using value_view_type = EnumValueView<enum_type>;
 
     /**
     * @brief Returns the static enum definition wrapped by this object.
@@ -429,7 +428,7 @@ namespace Constexpr {
     }
 
     /**
-    * @brief Binds a value using the existing runtime enum-value view shape.
+    * @brief Binds a value using a one-member constexpr enum-value view.
     *
     * @param enum_value - Runtime value to interpret.
     * @return constexpr_view_type - One-member streamable render view.

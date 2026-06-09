@@ -432,6 +432,8 @@ namespace Constexpr {
         std::string_view name,
         eEnumCommand format)
       {
+        assert(!(format & ~eEnumCommand::mNumericFormat)
+          || !"Valid Numeric format flags are: fRightShiftBits, fPackedBits or fIsSigned.");
         auto const u_bitmask{ make_unsigned_equivalent(bitmask) };
         assert(u_bitmask || !"Numeric bitmask cannot be 0");
         assert(is_subset_of(u_bitmask, scope.scope_bitmask()) || !"Numeric bitmask must be a subset of the parent scope_bitmask");

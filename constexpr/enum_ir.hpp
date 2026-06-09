@@ -38,6 +38,7 @@ namespace eEnumCommand_ns {
     mCountLarge        = 0b0001'1111, // Mask for count
     mCountMedium       = 0b0000'1111, // Mask for count
     mCountSmall        = 0b0000'0111, // Mask for count
+    mNumericFormat     = 0b0000'0111, // Mask for numeric formatting.
 
     //                    Count size --v-- Holds number of items that follow and may be 0 or 1 based.
     Terminate          = 0 << 5,  // | - | End of stream if stream length not known.
