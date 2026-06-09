@@ -2370,4 +2370,80 @@ TEST(EnumSpecDecode, ScopedEnumCompressedRoundTripPreservesRendering)
     render_enum_value(source, WideFlags::GroupField));
 }
 
+// ─── ConstexprEnum facade ────────────────────────────────────────────────────
+
+// Shared compile-time enum used by all ConstexprEnum facade tests.
+// Uses the same two named pairs as kDecodeProgram so program output can be
+// compared against that independently-known byte sequence.
+DEFINE_ENUM_DESCRIPTION(kConstexprFacadeEnum, TestEnum,
+  .Named(TestEnum{ 0x01u }, "one")
+  .Named(TestEnum{ 0x02u }, "two")
+);
+
+// Prove that used_space(), allocated_space(), and program_size() are
+// constexpr-accessible through the ConstexprEnum facade.
+static_assert(
+  kConstexprFacadeEnum.used_space() == kConstexprFacadeEnum.enum_def().used_space());
+static_assert(
+  kConstexprFacadeEnum.allocated_space() == kConstexprFacadeEnum.enum_def().allocated_space());
+static_assert(
+  kConstexprFacadeEnum.program_size() == sizeof(kDecodeProgram));
+static_assert(
+  kConstexprFacadeEnum.program_size() == kConstexprFacadeEnum.enum_def().program_size());
+
+// Prove that the buffer output_program() overload is usable during constant evaluation.
+constexpr bool constexpr_enum_facade_output_program_is_constexpr{
+  [] {
+    constexpr std::size_t size{ kConstexprFacadeEnum.program_size() };
+    char buf[size]{};
+    char* const end{ kConstexprFacadeEnum.output_program(buf, buf + size) };
+    return end == buf + size
+      && std::string_view{ buf, size } == kDecodeProgramSv;
+  }()
+};
+static_assert(constexpr_enum_facade_output_program_is_constexpr);
+
+TEST(EnumSpecConstexprEnum, SpaceFacadesMatchUnderlyingEnumDef)
+{
+  // used_space() and allocated_space() on ConstexprEnum must return the same
+  // packed values as calling them directly on the wrapped enum_def().
+  EXPECT_EQ(kConstexprFacadeEnum.used_space(),
+            kConstexprFacadeEnum.enum_def().used_space());
+  EXPECT_EQ(kConstexprFacadeEnum.allocated_space(),
+            kConstexprFacadeEnum.enum_def().allocated_space());
+}
+
+TEST(EnumSpecConstexprEnum, OutputProgramFacadesMatchEnumDefAndExpectedProgram)
+{
+  // All three output_program() overloads and program_size() on ConstexprEnum
+  // must produce the same program bytes as the underlying enum_def() and as
+  // the known expected program for Named(0x01,"one") + Named(0x02,"two").
+  std::string const expected{ kDecodeProgramSv };
+  auto const& enum_def{ kConstexprFacadeEnum.enum_def() };
+
+  EXPECT_EQ(kConstexprFacadeEnum.program_size(), expected.size());
+  EXPECT_EQ(kConstexprFacadeEnum.program_size(), enum_def.program_size());
+
+  EXPECT_EQ(kConstexprFacadeEnum.output_program(), expected);
+
+  std::string expected_with_terminate{ expected };
+  expected_with_terminate.push_back(static_cast<char>(eEnumCommand::Terminate));
+  EXPECT_EQ(kConstexprFacadeEnum.program_size(false, true),
+            expected_with_terminate.size());
+  EXPECT_EQ(kConstexprFacadeEnum.output_program(false, true),
+            expected_with_terminate);
+
+  char buffer[32]{};
+  char* const end{
+    kConstexprFacadeEnum.output_program(buffer, buffer + sizeof(buffer))
+  };
+  EXPECT_EQ(static_cast<std::size_t>(end - buffer), expected.size());
+  EXPECT_EQ((std::string_view{ buffer, static_cast<std::size_t>(end - buffer) }),
+            std::string_view{ expected });
+
+  std::ostringstream stream{};
+  EXPECT_EQ(&kConstexprFacadeEnum.output_program(stream), &stream);
+  EXPECT_EQ(stream.str(), expected);
+}
+
 } // namespace

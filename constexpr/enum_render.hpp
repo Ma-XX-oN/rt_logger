@@ -14,10 +14,13 @@
 #include <string>
 #include <ostream>
 
-namespace Constexpr { namespace impl {
+namespace Constexpr {
+  namespace impl {
 
     /**
      * @brief Renders one enum description plus runtime value into output text.
+     *
+     * TODO: May want to make this constexpr.  Have to think about it.
      *
      * @tparam EnumT - Immutable enum description type.
      */
@@ -262,7 +265,7 @@ namespace Constexpr { namespace impl {
       }
     };
 
-} // namespace impl
+  } // namespace impl
 
   /**
    * @brief Streamable render view for one enum description and runtime value.
@@ -327,6 +330,208 @@ namespace Constexpr { namespace impl {
    */
   template <typename EnumT>
   std::ostream& operator<<(std::ostream& stream, EnumValueView<EnumT> const& value_view) {
+    return stream << value_view.to_string();
+  }
+
+  /**
+  * @brief Streamable render view for one static constexpr enum definition.
+  *
+  * The enum definition is supplied as a non-type template parameter (NTTP), so
+  * the view only stores the runtime enum value.
+  *
+  * @tparam EnumDef - Static constexpr enum definition object.
+  */
+  template <auto const& EnumDef>
+  class ConstexprEnumValueView {
+    using enum_type = std::remove_cv_t<
+      std::remove_reference_t<decltype(EnumDef)>>;
+
+    typename enum_type::value_type m_value{};
+
+  public:
+    using value_type = typename enum_type::value_type;
+
+    /**
+    * @brief Constructs a render view for one runtime value.
+    *
+    * @param value - Runtime value to interpret.
+    */
+    constexpr explicit ConstexprEnumValueView(value_type value) noexcept
+    : m_value{ value }
+    {
+    }
+
+    /**
+    * @brief Returns the static enum definition bound to this view type.
+    *
+    * @return enum_type const& - Static enum definition.
+    */
+    static constexpr enum_type const& enum_def() noexcept {
+      return EnumDef;
+    }
+
+    /**
+    * @brief Returns the bound runtime value.
+    *
+    * @return value_type - Stored runtime value.
+    */
+    constexpr value_type value() const noexcept {
+      return m_value;
+    }
+
+    /**
+    * @brief Renders the bound enum definition and runtime value into text.
+    *
+    * @return std::string - Final rendered text.
+    */
+    std::string to_string() const {
+      return impl::EnumTextRenderer<enum_type>{ enum_def(), value() }.render();
+    }
+  };
+
+  /**
+  * @brief Callable wrapper for one static constexpr enum definition.
+  *
+  * \c operator() and \c value() returns a one-member view because the enum
+  * definition is carried by the view type.
+  *
+  * @tparam EnumDef - Static constexpr enum definition object.
+  */
+  template <auto const& EnumDef>
+  class ConstexprEnum {
+    using enum_type = std::remove_cv_t<
+      std::remove_reference_t<decltype(EnumDef)>>;
+
+  public:
+    using value_type = typename enum_type::value_type;
+    using constexpr_view_type = ConstexprEnumValueView<EnumDef>;
+    using value_view_type = EnumValueView<enum_type>;
+
+    /**
+    * @brief Returns the static enum definition wrapped by this object.
+    *
+    * @return enum_type const& - Static enum definition.
+    */
+    static constexpr enum_type const& enum_def() noexcept {
+      return EnumDef;
+    }
+
+    /**
+    * @brief Binds a value using a one-member constexpr enum-value view.
+    *
+    * @param enum_value - Runtime value to interpret.
+    * @return constexpr_view_type - One-member streamable render view.
+    */
+    constexpr constexpr_view_type operator()(value_type const& enum_value) const
+      noexcept
+    {
+      return constexpr_view_type{ enum_value };
+    }
+
+    /**
+    * @brief Binds a value using the existing runtime enum-value view shape.
+    *
+    * @param enum_value - Runtime value to interpret.
+    * @return constexpr_view_type - One-member streamable render view.
+    */
+    constexpr constexpr_view_type value(value_type const& enum_value) const noexcept {
+      return constexpr_view_type{ enum_value };
+    }
+
+    /**
+    * @brief Returns the packed used string/item space of the enum definition.
+    *
+    * @return std::uint32_t - Packed used-space summary.
+    */
+    constexpr std::uint32_t used_space() const noexcept {
+      return enum_def().used_space();
+    }
+
+    /**
+    * @brief Returns the packed allocated string/item capacity of the enum definition.
+    *
+    * @return std::uint32_t - Packed allocated-space summary.
+    */
+    constexpr std::uint32_t allocated_space() const noexcept {
+      return enum_def().allocated_space();
+    }
+
+    /**
+    * @brief Returns the exact encoded program size including the storage header.
+    *
+    * @param compress - Whether constrained values should be dint-condensed.
+    * @param append_terminate - Whether to append an explicit Terminate opcode.
+    * @return std::size_t - Exact number of bytes required for output_program().
+    */
+    constexpr std::size_t program_size(
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return enum_def().program_size(compress, append_terminate);
+    }
+
+    /**
+    * @brief Encodes the full headered program into one caller-supplied buffer.
+    *
+    * @param begin - First writable byte in the destination buffer.
+    * @param end - One-past-the-end of the destination buffer.
+    * @param compress - Whether constrained values should be dint-condensed.
+    * @param append_terminate - Whether to append an explicit Terminate opcode.
+    * @return char* - Pointer one past the last byte written.
+    */
+    constexpr char* output_program(
+      char* begin,
+      char* end,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return enum_def().output_program(begin, end, compress, append_terminate);
+    }
+
+    /**
+    * @brief Encodes the full headered program into one runtime-owned string.
+    *
+    * @param compress - Whether constrained values should be dint-condensed.
+    * @param append_terminate - Whether to append an explicit Terminate opcode.
+    * @return std::string - Runtime-owned encoded program bytes.
+    */
+    std::string output_program(
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return enum_def().output_program(compress, append_terminate);
+    }
+
+    /**
+    * @brief Encodes the full headered program into one output stream.
+    *
+    * @param os - Destination output stream.
+    * @param compress - Whether constrained values should be dint-condensed.
+    * @param append_terminate - Whether to append an explicit Terminate opcode.
+    * @return std::ostream& - The same destination output stream.
+    */
+    std::ostream& output_program(
+      std::ostream& os,
+      bool compress = false,
+      bool append_terminate = false) const
+    {
+      return enum_def().output_program(os, compress, append_terminate);
+    }
+  };
+
+  /**
+  * @brief Streams one rendered constexpr enum value view.
+  *
+  * @tparam EnumDef - Static constexpr enum definition object.
+  * @param stream - Destination output stream.
+  * @param value_view - Enum value view to render.
+  * @return std::ostream& - Destination output stream.
+  */
+  template <auto const& EnumDef>
+  std::ostream& operator<<(
+    std::ostream& stream,
+    ConstexprEnumValueView<EnumDef> const& value_view)
+  {
     return stream << value_view.to_string();
   }
 

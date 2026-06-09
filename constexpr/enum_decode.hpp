@@ -819,14 +819,6 @@ namespace Constexpr { namespace impl {
       return m_enum;
     }
 
-    /**
-     * @brief Returns the used string/item space of the decoded enum.
-     *
-     * @return std::uint32_t - Packed used-space summary.
-     */
-    constexpr std::uint32_t used_space() const {
-      return m_enum.used_space();
-    }
   };
 
 } // namespace Constexpr

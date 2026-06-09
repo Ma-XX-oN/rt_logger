@@ -222,6 +222,28 @@ namespace Constexpr {
         return enum_desc.output_program(os, compress, append_terminate);
       });
     }
+
+    /**
+     * @brief Returns the packed used string/item space of the active decoded
+     *   typed enum description.
+     *
+     * @return std::uint32_t - Packed used-space summary.
+     */
+    std::uint32_t used_space() const {
+      return visit([](auto const& enum_desc) {
+        return enum_desc.used_space();
+      });
+    }
+
+    /**
+     * @brief Returns the packed allocated string/item capacity shared by all
+     *   typed alternatives.
+     *
+     * @return std::uint32_t - Packed allocated-space summary.
+     */
+    constexpr std::uint32_t allocated_space() const noexcept {
+      return StringAndItemCapacity;
+    }
   };
 
   /**

@@ -1087,14 +1087,6 @@ namespace Constexpr {
       return ~unsigned_value_type{};
     }
 
-    /**
-     * @brief Returns the configured fixed-capacity storage budget.
-     *
-     * @return std::uint32_t - Packed string/item capacity summary.
-     */
-    constexpr std::uint32_t used_space() const {
-      return m_enum.used_space();
-    }
   };
 
   /**
@@ -1140,8 +1132,8 @@ namespace Constexpr {
     /**
      * @brief Decode a serialised definition stream as a terminal chain step.
      *
-     * After calling this function only \c Build() and \c used_space() are
-     * available on the returned wrapper.
+     * After calling this function only \c Build() is available on the
+     * returned wrapper.
      *
      * @param program - Definition stream including the storage-type header.
      * @param throw_on_terminate - Whether a Terminate opcode is a parse error.
@@ -1187,8 +1179,20 @@ namespace Constexpr {
     Constexpr::EnumSettings<                                                  \
       enum_type,                                                              \
       Constexpr::build_enum_description<Constexpr::EnumSettings<enum_type>>() \
-        enum_description.used_space()                                         \
+        enum_description.Build().used_space()                                 \
     >                                                                         \
-  >() enum_description.Build())
+  >() enum_description.Build())                                               \
+// END MACRO
+
+#define DEFINE_ENUM_DESCRIPTION(name, enum_type, enum_description)            \
+  namespace name##_ns {                                                       \
+    inline constexpr auto enum_def{                                           \
+      BUILD_ENUM_DESCRIPTION(enum_type, enum_description)                     \
+    };                                                                        \
+  }                                                                           \
+  inline constexpr auto name{                                                 \
+    Constexpr::ConstexprEnum<name##_ns::enum_def>{}                           \
+  }                                                                           \
+// END MACRO
 
 #endif // CONSTEXPR_ENUM_BUILDER_HPP

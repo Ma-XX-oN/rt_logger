@@ -18,6 +18,28 @@
   - [5. Re-Emit A Program Into A Fixed Buffer](#5-re-emit-a-program-into-a-fixed-buffer)
   - [6. Re-Emit A Program As `std::string` Or To `std::ostream`](#6-re-emit-a-program-as-stdstring-or-to-stdostream)
   - [7. Reduce Compile-Time Storage With The Macro](#7-reduce-compile-time-storage-with-the-macro)
+- [API Reference](#api-reference)
+  - [Storage Configuration](#storage-configuration)
+  - [Entry Points](#entry-points)
+    - [`build_enum_description<Settings>()`](#build_enum_descriptionsettings)
+    - [`BUILD_ENUM_DESCRIPTION(enum_type, chain)`](#build_enum_descriptionenum_type-chain)
+    - [`DEFINE_ENUM_DESCRIPTION(name, enum_type, chain)`](#define_enum_descriptionname-enum_type-chain)
+    - [`build_any_enum_description<Capacity>()`](#build_any_enum_descriptioncapacity)
+  - [Builder Chain](#builder-chain)
+    - [Common operations (all scopes)](#common-operations-all-scopes)
+    - [Root/main builder operations (root scope only)](#rootmain-builder-operations-root-scope-only)
+    - [Inside a conditional scope (after `If` or `IfNot`)](#inside-a-conditional-scope-after-if-or-ifnot)
+    - [Inside an else scope (after `Else`)](#inside-an-else-scope-after-else)
+    - [Any-enum builder (after `build_any_enum_description`)](#any-enum-builder-after-build_any_enum_description)
+  - [Enum Descriptions](#enum-descriptions)
+    - [`Enum<Settings>` — typed description](#enumsettings--typed-description)
+    - [`ConstexprEnum<EnumDef>` — constexpr enum description handle](#constexprenumenumdef--constexpr-enum-description-handle)
+    - [`AnyEnumDescription<Capacity>` — type-erased description](#anyenumdescriptioncapacity--type-erased-description)
+  - [Value Views](#value-views)
+    - [`EnumValueView` — from `Enum`](#enumvalueview--from-enum)
+    - [`ConstexprEnumValueView` — from `ConstexprEnum`](#constexprenumvalueview--from-constexprenum)
+    - [`AnyEnumValueView` — from `AnyEnumDescription`](#anyenumvalueview--from-anyenumdescription)
+  - [Parse Errors](#parse-errors)
 - [Future Possible Semantics](#future-possible-semantics)
   - [1. Reflect Names Back Into Values](#1-reflect-names-back-into-values)
   - [2. Add Group-Aware Safety Helpers](#2-add-group-aware-safety-helpers)
@@ -383,6 +405,224 @@ constexpr auto ModeDesc = BUILD_ENUM_DESCRIPTION(eMode,
   .Named(eMode::Error, "ERROR")
 );
 ```
+
+## API Reference
+
+### Storage Configuration
+
+| Symbol                                             | Description                                                                                                                                   |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pack_space(strings, items)`                       | Packs a string-byte count and an item-slot count into a single `uint32_t` suitable for `EnumSettings`.                                        |
+| `DefaultReserved`                                  | Default capacity: `pack_space(256, 128)`.                                                                                                     |
+| `EnumSettings<ValueT, Capacity = DefaultReserved>` | Settings bundle. `ValueT` is the enum or integer type the description targets. `Capacity` is a packed string/item budget from `pack_space()`. |
+
+### Entry Points
+
+The examples below use this enum type:
+
+```cpp
+enum class eMode : std::uint8_t { Idle = 0x00, Busy = 0x01, Error = 0x02 };
+```
+
+#### `build_enum_description<Settings>()`
+
+Starts a typed builder chain. Use this when you want explicit control over storage capacity or when the description is a
+runtime (non-`constexpr`) object.
+
+```cpp
+constexpr auto desc = Constexpr::build_enum_description<Constexpr::EnumSettings<eMode>>()
+  .Named(eMode::Idle, "IDLE")
+  .Build();
+```
+
+#### `BUILD_ENUM_DESCRIPTION(enum_type, chain)`
+
+Two-pass macro that measures used space in the first pass and allocates exactly that much in the second. Returns an
+`Enum<Settings>` sized to fit. Use this for `constexpr` descriptions to minimise compile-time storage.
+
+```cpp
+constexpr auto desc = BUILD_ENUM_DESCRIPTION(eMode,
+  .Named(eMode::Idle, "IDLE")
+  .Named(eMode::Busy, "BUSY")
+);
+```
+
+#### `DEFINE_ENUM_DESCRIPTION(name, enum_type, chain)`
+
+Wraps `BUILD_ENUM_DESCRIPTION` and declares `inline constexpr Constexpr::ConstexprEnum<...> name{}` at the enclosing
+scope. Also creates a companion `name_ns::enum_def` holding the raw `Enum<Settings>`.
+
+```cpp
+DEFINE_ENUM_DESCRIPTION(ModeDesc, eMode,
+  .Named(eMode::Idle, "IDLE")
+  .Named(eMode::Busy, "BUSY")
+);
+// ModeDesc(eMode::Idle) is now a streamable render view
+```
+
+#### `build_any_enum_description<Capacity>()`
+
+Starts a type-erased builder for programs received at runtime when the wire value type is not known at compile time.
+
+```cpp
+auto desc = Constexpr::build_any_enum_description<Constexpr::pack_space(512, 256)>()
+  .decode_program(received_bytes)
+  .Build();
+```
+
+### Builder Chain
+
+All builder scopes expose the same core set of entry-adding operations. The scope you currently hold determines which
+additional operations are available.
+
+#### Common operations (all scopes)
+
+Available in every scope — root builder, conditional scope, and else scope:
+
+| Method                                      | Returns           | Description                                                                                 |
+| ------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------- |
+| `.Named(value, name)`                       | current scope     | Add a named value using the current scope bitmask.                                          |
+| `.Named(value, name, bitmask)`              | current scope     | Add a named value under a command-local bitmask.                                            |
+| `.Numeric(bitmask, name)`                   | current scope     | Add a numeric output field for the given bitmask.                                           |
+| `.Numeric(bitmask, name, format)`           | current scope     | Same, with `eEnumCommand` formatting flags (`fRightShiftBits`, `fPackedBits`, `fIsSigned`). |
+| `.If(group_bit, scope_mask)`                | conditional scope | Start a conditional branch guarded by a single bit.                                         |
+| `.If(group_bit, scope_mask, group_name)`    | conditional scope | Same with an optional label (stored, not yet rendered).                                     |
+| `.IfNot(group_bit, scope_mask)`             | conditional scope | Like `If`, but the first authored branch is the false case.                                 |
+| `.IfNot(group_bit, scope_mask, group_name)` | conditional scope | Same with an optional group label.                                                          |
+
+#### Root/main builder operations (root scope only)
+
+- **`.reserve_space<S, I>()`** — resize the backing storage (`S` = string bytes, `I` = item slots); valid at the
+  **start of the chain**, before any entries are added; returns a fresh root builder.
+- **`.decode_program(program, throw_on_terminate = true)`** — decode a serialised program:
+  - **Precondition:** no entries may have been added yet.
+  - **Returns:** a terminal builder; only `.Build()` is available.
+- **`.Build()`** — finalise and return the immutable `Enum<Settings>`.
+
+#### Inside a conditional scope (after `If` or `IfNot`)
+
+The same common operations are available plus:
+
+| Method              | Returns      | Description                                          |
+| ------------------- | ------------ | ---------------------------------------------------- |
+| `.Else()`           | else scope   | Switch to the else branch.                           |
+| `.Else(group_name)` | else scope   | Switch to a named else branch.                       |
+| `.End()`            | parent scope | Close this branch and return to the enclosing scope. |
+
+#### Inside an else scope (after `Else`)
+
+The same operations as a conditional scope are available — including `.End()` to return to the enclosing scope — except
+`.Else()` is not available (a second else branch is not permitted).
+
+#### Any-enum builder (after `build_any_enum_description`)
+
+Does not support the entry-adding operations above; only decodes a pre-built program:
+
+- **`.decode_program(program, throw_on_terminate = true)`** — store the program to decode on `.Build()`.
+- **`.Build()`** — decode the stored program and return `AnyEnumDescription<Capacity>`.
+- **`.allocated_space()`** — `constexpr`. Packed string/item capacity configured for this builder.
+
+### Enum Descriptions
+
+#### `Enum<Settings>` — typed description
+
+The core immutable typed description. Produced by `.Build()` on any typed builder, or by `BUILD_ENUM_DESCRIPTION`.
+
+| Method                                                                    | Returns         | Description                                                                                                      |
+| ------------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `.value(v)`                                                               | `EnumValueView` | `constexpr`. Bind a runtime value for rendering. Contains the value `v` and a reference to the Enum description. |
+| `.operator()(v)`                                                          | `EnumValueView` | `constexpr`. Alias for `.value(v)`.                                                                              |
+| `.program_size(compress = false, append_terminate = false)`               | `size_t`        | `constexpr`. Number of bytes `output_program()` will write.                                                      |
+| `.output_program(begin, end, compress = false, append_terminate = false)` | `char*`         | `constexpr`. Encode into a caller-supplied buffer; returns one-past-end.                                         |
+| `.output_program(compress = false, append_terminate = false)`             | `std::string`   | Encode into a new string.                                                                                        |
+| `.output_program(os, compress = false, append_terminate = false)`         | `std::ostream&` | Encode into an output stream.                                                                                    |
+| `.used_space()`                                                           | `uint32_t`      | `constexpr`. Packed string/item bytes actually used.                                                             |
+| `.allocated_space()`                                                      | `uint32_t`      | `constexpr`. Packed string/item bytes allocated.                                                                 |
+
+#### `ConstexprEnum<EnumDef>` — constexpr enum description handle
+
+Produced by `DEFINE_ENUM_DESCRIPTION`. The enum description is baked into the type as a non-type template parameter
+(NTTP), so that the return type of `.value()` and `operator()` will also store the description as an NTTP. This allows
+the runtime value to be just the underlying type. No pointer or reference to the description needed.
+
+| Method                                                                    | Returns                  | Description                                                                   |
+| ------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| `static .enum_def()`                                                      | `Enum<Settings> const&`  | `constexpr`. The underlying typed description.                                |
+| `.value(v)`                                                               | `ConstexprEnumValueView` | `constexpr`. Bind a runtime value for rendering. Contains only the value `v`. |
+| `.operator()(v)`                                                          | `ConstexprEnumValueView` | `constexpr`. Alias for `.value(v)`.                                           |
+| `.program_size(compress = false, append_terminate = false)`               | `size_t`                 | `constexpr`. Number of bytes `output_program()` will write.                   |
+| `.output_program(begin, end, compress = false, append_terminate = false)` | `char*`                  | `constexpr`. Encode into a caller-supplied buffer; returns one-past-end.      |
+| `.output_program(compress = false, append_terminate = false)`             | `std::string`            | Encode into a new string.                                                     |
+| `.output_program(os, compress = false, append_terminate = false)`         | `std::ostream&`          | Encode into an output stream.                                                 |
+| `.used_space()`                                                           | `uint32_t`               | `constexpr`. Packed string/item bytes actually used.                          |
+| `.allocated_space()`                                                      | `uint32_t`               | `constexpr`. Packed string/item bytes allocated.                              |
+
+#### `AnyEnumDescription<Capacity>` — type-erased description
+
+Produced by the any-enum builder. Holds one of eight signed or unsigned typed descriptions behind a `std::variant`.
+
+| Method                                                                    | Returns            | Description                                                                                                                                                    |
+| ------------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.is_signed()`                                                            | `bool`             | Whether the wire value type is signed.                                                                                                                         |
+| `.storage_type()`                                                         | `eEnumStorageType` | Width/sign discriminator from the wire header.                                                                                                                 |
+| `.value_unsigned(uint64_t)`                                               | `AnyEnumValueView` | Bind an unsigned value for rendering. Throws `std::invalid_argument` if the wire type is signed, or `std::out_of_range` if the value overflows the wire width. |
+| `.value_signed(int64_t)`                                                  | `AnyEnumValueView` | Bind a signed value for rendering. Throws `std::invalid_argument` if the wire type is unsigned, or `std::out_of_range` if the value overflows the wire width.  |
+| `.visit(visitor)`                                                         | visitor result     | Invoke a callable with the active typed `Enum<Settings>` alternative.                                                                                          |
+| `.program_size(compress = false, append_terminate = false)`               | `size_t`           | Number of bytes `output_program()` will write.                                                                                                                 |
+| `.output_program(begin, end, compress = false, append_terminate = false)` | `char*`            | Encode into a caller-supplied buffer; returns one-past-end.                                                                                                    |
+| `.output_program(compress = false, append_terminate = false)`             | `std::string`      | Encode into a new string.                                                                                                                                      |
+| `.output_program(os, compress = false, append_terminate = false)`         | `std::ostream&`    | Encode into an output stream.                                                                                                                                  |
+| `.used_space()`                                                           | `uint32_t`         | Packed string/item bytes actually used by the active decoded description.                                                                                      |
+| `.allocated_space()`                                                      | `uint32_t`         | `constexpr`. Packed string/item bytes allocated (shared by all typed alternatives).                                                                            |
+
+### Value Views
+
+All three view types support `operator<<` for direct stream rendering.
+
+#### `EnumValueView` — from `Enum`
+
+Produced by `Enum::value()` or `Enum::operator()`.
+
+| Method         | Returns                 | Description                               |
+| -------------- | ----------------------- | ----------------------------------------- |
+| `.enum_def()`  | `Enum<Settings> const&` | `constexpr`. The bound typed description. |
+| `.value()`     | `value_type`            | `constexpr`. The bound runtime value.     |
+| `.to_string()` | `std::string`           | Render to text.                           |
+
+#### `ConstexprEnumValueView` — from `ConstexprEnum`
+
+Produced by `ConstexprEnum::value()` or `ConstexprEnum::operator()`. Stores only the runtime value; the description
+lives in the type.
+
+| Method               | Returns                 | Description                               |
+| -------------------- | ----------------------- | ----------------------------------------- |
+| `static .enum_def()` | `Enum<Settings> const&` | `constexpr`. The bound typed description. |
+| `.value()`           | `value_type`            | `constexpr`. The bound runtime value.     |
+| `.to_string()`       | `std::string`           | Render to text.                           |
+
+#### `AnyEnumValueView` — from `AnyEnumDescription`
+
+Produced by `AnyEnumDescription::value_unsigned()` or `value_signed()`.
+
+| Method          | Returns                     | Description                                      |
+| --------------- | --------------------------- | ------------------------------------------------ |
+| `.enum_def()`   | `AnyEnumDescription const&` | `constexpr`. The bound type-erased description.  |
+| `.value_bits()` | `uint64_t`                  | `constexpr`. The bound value as raw 64-bit bits. |
+| `.to_string()`  | `std::string`               | Render to text.                                  |
+
+### Parse Errors
+
+All inherit from `Constexpr::EnumParseError` (`std::runtime_error`). Thrown by `decode_program` and the any-enum
+builder.
+
+| Type                        | Thrown when                                                    |
+| --------------------------- | -------------------------------------------------------------- |
+| `EnumParseEmptyInput`       | The program has zero bytes (no header).                        |
+| `EnumParseHeaderMismatch`   | The header storage type does not match `Settings::value_type`. |
+| `EnumParseUnexpectedEof`    | The stream ends before a value or string is fully decoded.     |
+| `EnumParseInvalidOpcode`    | An opcode byte uses invalid or reserved bits.                  |
+| `EnumParseInvalidStructure` | A bitmask, value, or scope relationship violates the grammar.  |
+| `EnumParseCapacityExceeded` | Decoded content exceeds the destination `Settings` capacity.   |
 
 ## Future Possible Semantics
 
