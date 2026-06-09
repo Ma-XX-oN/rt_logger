@@ -11,7 +11,10 @@
  * ID for format and the parameters as binary data, thus reducing the size of
  * the data stream and the amount of CPU to encode it.
  *
- * TODO: Flesh out specification.
+ * TODO: Flesh out implementation.  A lot of stuff that was put on the back
+ *       burner while working on Enum specification and implementation of data
+ *       representation serialisation. Constexpr skills acquired from that can
+ *       be applied to this.
  */
 
 #include <cassert>
@@ -402,14 +405,14 @@ struct enable_bitwise_ops<eType> : std::true_type {
  * 
  * Recognised by it's value being less than 32.
  *
- * If specified, NegativeMask bits will never be 0 and is always followed by
+ * If specified, mNegative bits will never be 0 and is always followed by
  * eFmt1.
  */
 enum eFmt0 : uint8_t {
   // 000000ba make  -  mandatory (01) Not starting at 0 so this doesn't terminate string.
   // 000000ba make +/- mandatory (10)
   // 000000ba make  /- mandatory (11)
-  NegativeMask   = 0b00000011,
+  mNegative      = 0b00000011,
   Negative       = 0b00000001, // Shows -, but no character for +
   NegativePos    = 0b00000010, // Shows - and +
   NegativeSpace  = 0b00000011, // Shows - and a space for +
@@ -441,7 +444,7 @@ enum eFmt1 : uint8_t {
   MinFieldParam  = 0b00000010, // minimum field is not embedded in string, but as a parameter.
 
   // 0000hg00   left/right justified (0 is left justified, 1 is right justified)
-  JustifyMask    = 0b00001100,
+  mJustify       = 0b00001100,
   JustifyLeft    = 0b00000000, // Left justify with pad chars after it if field larger than number.
   JustifyFill    = 0b00000100, // Right justify with pad chars after sign, before number.
   JustifyRight   = 0b00001000, // Right justify with pad chars before sign, sign is next to number.
@@ -465,10 +468,11 @@ template <>
 struct enable_bitwise_ops<eFmt1> : std::true_type {
 };
 
-enum eFmtLetter : char {
-  FormatMask    = 0x0F,
-  NoCaseMask    = 0x08, // Has no case associated with format.
-  UpperCaseMask = 0x04, // Is uppercase (value 0x04 itself isn't actually used since it's lowercase value is 0, which isn't valid in an fstring)
+namespace eFmtLetter_ns {
+enum eFmtLetter : std::uint8_t {
+  mFormat       = 0x0F,
+  mNoCase       = 0x08, // Has no case associated with format.
+  mUpperCase    = 0x04, // Is uppercase (value 0x04 itself isn't actually used since it's lowercase value is 0, which isn't valid in an fstring)
 
   SciLower      = 0x01, // 'e' float / double - (lowercase) Scientific
   FixLower      = 0x02, // 'f' float / double - (lowercase) Fixed precision
@@ -486,20 +490,22 @@ enum eFmtLetter : char {
   String        = 0x0E, // 's' char const* / char const[] / std::string
   Percent       = 0x0F, // '%' float / double - Show as percentage (mult by 100 add % sign)
 
-  GroupFracMask    = 0b11000000,
+  mGroupFrac       = 0b11000000,
   GroupFracNone    = 0b00000000, // No grouping chars used in fraction part.
   GroupFracComma   = 0b01000000, // in fraction part, put a ',' every 3 digits (dec)
   GroupFracUnder   = 0b10000000, // in fraction part, put a '_' every 3 digits (dec)
   GroupFracLocale  = 0b11000000, // in fraction part, put a locale separator character
                                  //   every 3 digits (dec)
 
-  GroupWholeMask   = 0b00110000,
+  mGroupWhole      = 0b00110000,
   GroupWholeNone   = 0b00000000, // No grouping chars used in whole part.
   GroupWholeComma  = 0b00010000, // in whole part, put a ',' every 3 digits (dec) or 4 digits (bin, oct, hex)
   GroupWholeUnder  = 0b00100000, // in whole part, put a '_' every 3 digits (dec) or 4 digits (bin, oct, hex)
   GroupWholeLocale = 0b00110000, // in whole part, put a locale separator character every 3 digits (dec) or 4
                                  //   digits (bin, oct, hex)
 };
+}
+using eFmtLetter = eFmtLetter_ns::eFmtLetter;
 
 template<>
 struct enable_bitwise_ops<eFmtLetter> : std::true_type {
@@ -542,36 +548,36 @@ struct enable_bitwise_ops<eFmtLetter> : std::true_type {
 //   static_assert(std::is_array_v<std::remove_reference_t<T>>);
 // }
 
-/**
- * @brief Append \p C1s to \p C0s in the returned char_sequence type.
- * 
- * @tparam C0s - Characters to append to.
- * @tparam C1s - Characters to append.
- * @return char_sequence<C0s..., C1s...> 
- */
-template<char...C0s, char...C1s>
-auto append_to_seq(char_sequence<C0s...>, char_sequence<C1s...>) {
-  return char_sequence<C0s..., C1s...>;
-}
+// /**
+//  * @brief Append \p C1s to \p C0s in the returned char_sequence type.
+//  * 
+//  * @tparam C0s - Characters to append to.
+//  * @tparam C1s - Characters to append.
+//  * @return char_sequence<C0s..., C1s...> 
+//  */
+// template<char...C0s, char...C1s>
+// auto append_to_seq(char_sequence<C0s...>, char_sequence<C1s...>) {
+//   return char_sequence<C0s..., C1s...>;
+// }
 
-template<auto Buff, char...C0s, std::size_t...Is>
-auto append_to_seq_impl(char_sequence<C0s...>, std::index_sequence<Is...>) {
-  return char_sequence<C0s..., static_cast<char>(Buff[Is])...>{};
-}
+// template<auto Buff, char...C0s, std::size_t...Is>
+// auto append_to_seq_impl(char_sequence<C0s...>, std::index_sequence<Is...>) {
+//   return char_sequence<C0s..., static_cast<char>(Buff[Is])...>{};
+// }
 
-/**
- * @brief Appends characters in \p Buff to \p CS.
- * 
- * @tparam Buff - An \c std::array or a C-array containing elements to append.
- * @tparam CS - A \c char_sequence type to append to.
- * @param char_seq - Used to pass the CS type.
- * 
- * @return auto - A new char_sequence with the values appended.
- */
-template<auto Buff, typename CS>
-auto append_to_seq(CS char_seq) {
-  return append_to_seq_impl<Buff>(char_seq, std::make_index_sequence<std::size(Buff)>{});  
-}
+// /**
+//  * @brief Appends characters in \p Buff to \p CS.
+//  * 
+//  * @tparam Buff - An \c std::array or a C-array containing elements to append.
+//  * @tparam CS - A \c char_sequence type to append to.
+//  * @param char_seq - Used to pass the CS type.
+//  * 
+//  * @return auto - A new char_sequence with the values appended.
+//  */
+// template<auto Buff, typename CS>
+// auto append_to_seq(CS char_seq) {
+//   return append_to_seq_impl<Buff>(char_seq, std::make_index_sequence<std::size(Buff)>{});  
+// }
 
 // All logged enums need to be registered
 template<typename E>
