@@ -77,7 +77,7 @@ If IntelliSense starts showing bogus include or language-mode errors, refresh
 the build metadata with:
 
 ```bash
-cmake --preset clang64-debug-ubsan -D DINT_BUILD_TESTS=ON
+cmake --preset clang64-debug-ubsan -D BUILD_TESTS=ON
 ```
 
 If VS Code still shows stale squiggles after that, reload the window or run

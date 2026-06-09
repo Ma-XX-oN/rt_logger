@@ -12,7 +12,7 @@
         "CMAKE_CXX_COMPILER": "C:/msys64/clang64/bin/clang++.exe",
         "CMAKE_MAKE_PROGRAM": "C:/msys64/clang64/bin/ninja.exe",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "DINT_ENABLE_UBSAN": "ON"
+        "ENABLE_UBSAN": "ON"
       },
       "environment": {
         "PATH": "C:/msys64/clang64/bin;$penv{PATH}"

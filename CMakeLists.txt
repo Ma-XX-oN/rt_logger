@@ -9,8 +9,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Toggle optional test-related build behavior from the configure step.
-option(DINT_BUILD_TESTS "Build unit tests" ON)
-option(DINT_ENABLE_UBSAN "Build tests with UBSan" ON)
+option(BUILD_TESTS "Build unit tests" ON)
+option(ENABLE_UBSAN "Build tests with UBSan" ON)
 
 # Header-only target that carries include paths and the required language level.
 add_library(dynamic_int INTERFACE)
@@ -26,7 +26,7 @@ target_compile_features(dynamic_int
 )
 
 # Reuse the same warning set across real build targets.
-function(dint_apply_common_warnings target_name)
+function(apply_common_warnings target_name)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${target_name}
       PRIVATE
@@ -41,22 +41,22 @@ endfunction()
 if(WIN32)
   # CLANG64-built executables need a few runtime DLLs beside the .exe when run
   # outside the MSYS2 shell environment.
-  get_filename_component(DINT_CLANG_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
-  set(DINT_EXTRA_RUNTIME_DLLS)
-  foreach(DINT_DLL_NAME libc++.dll libunwind.dll libwinpthread-1.dll)
-    if(EXISTS "${DINT_CLANG_BIN_DIR}/${DINT_DLL_NAME}")
-      list(APPEND DINT_EXTRA_RUNTIME_DLLS "${DINT_CLANG_BIN_DIR}/${DINT_DLL_NAME}")
+  get_filename_component(CLANG_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  set(EXTRA_RUNTIME_DLLS)
+  foreach(DLL_NAME libc++.dll libunwind.dll libwinpthread-1.dll)
+    if(EXISTS "${CLANG_BIN_DIR}/${DLL_NAME}")
+      list(APPEND EXTRA_RUNTIME_DLLS "${CLANG_BIN_DIR}/${DLL_NAME}")
     endif()
   endforeach()
 endif()
 
 # Copy compiler/runtime DLLs next to the target after linking on Windows.
-function(dint_copy_runtime_dlls target_name)
+function(copy_runtime_dlls target_name)
   if(WIN32)
     add_custom_command(TARGET ${target_name} POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_RUNTIME_DLLS:${target_name}>
-        ${DINT_EXTRA_RUNTIME_DLLS}
+        ${EXTRA_RUNTIME_DLLS}
         $<TARGET_FILE_DIR:${target_name}>
       COMMAND_EXPAND_LISTS
     )
@@ -64,8 +64,8 @@ function(dint_copy_runtime_dlls target_name)
 endfunction()
 
 # Enable UBSan only on targets that opt into it.
-function(dint_enable_ubsan target_name)
-  if(DINT_ENABLE_UBSAN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+function(ENABLE_UBSAN target_name)
+  if(ENABLE_UBSAN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${target_name}
       PRIVATE
         -fsanitize=undefined
@@ -90,16 +90,16 @@ target_link_libraries(playground
     dynamic_int
 )
 
-dint_apply_common_warnings(playground)
-dint_copy_runtime_dlls(playground)
+apply_common_warnings(playground)
+copy_runtime_dlls(playground)
 
-if(DINT_BUILD_TESTS)
+if(BUILD_TESTS)
   # CTest owns test execution; GoogleTest provides the actual test framework.
   enable_testing()
   find_package(GTest CONFIG REQUIRED)
 
   # Keep test code split across files, but link it into one executable.
-  set(DINT_TEST_SOURCES
+  set(TEST_SOURCES
     tests/test_dynamic_int.cpp
     tests/test_machine_num.cpp
     tests/test_constexpr_string_view.cpp
@@ -107,10 +107,11 @@ if(DINT_BUILD_TESTS)
     tests/test_heap.cpp
     tests/test_masked_bits.cpp
     tests/test_enum_spec.cpp
+    tests/test_enum_random_fuzz.cpp
   )
 
   add_executable(logger_tests
-    ${DINT_TEST_SOURCES}
+    ${TEST_SOURCES}
   )
 
   target_link_libraries(logger_tests
@@ -119,9 +120,9 @@ if(DINT_BUILD_TESTS)
       GTest::gtest_main
   )
 
-  dint_apply_common_warnings(logger_tests)
-  dint_copy_runtime_dlls(logger_tests)
-  dint_enable_ubsan(logger_tests)
+  apply_common_warnings(logger_tests)
+  copy_runtime_dlls(logger_tests)
+  ENABLE_UBSAN(logger_tests)
 
   add_executable(bit_tests
     tests/test_bit.cpp
@@ -133,9 +134,9 @@ if(DINT_BUILD_TESTS)
       GTest::gtest_main
   )
 
-  dint_apply_common_warnings(bit_tests)
-  dint_copy_runtime_dlls(bit_tests)
-  dint_enable_ubsan(bit_tests)
+  apply_common_warnings(bit_tests)
+  copy_runtime_dlls(bit_tests)
+  ENABLE_UBSAN(bit_tests)
 
   add_executable(bit_fallback_tests
     tests/test_bit.cpp
@@ -153,9 +154,9 @@ if(DINT_BUILD_TESTS)
       GTest::gtest_main
   )
 
-  dint_apply_common_warnings(bit_fallback_tests)
-  dint_copy_runtime_dlls(bit_fallback_tests)
-  dint_enable_ubsan(bit_fallback_tests)
+  apply_common_warnings(bit_fallback_tests)
+  copy_runtime_dlls(bit_fallback_tests)
+  ENABLE_UBSAN(bit_fallback_tests)
 
   include(GoogleTest)
   # Register each GoogleTest case with CTest so they can be listed and filtered
