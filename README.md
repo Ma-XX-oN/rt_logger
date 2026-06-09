@@ -24,7 +24,7 @@
       - [3. Data Block Payload](#3-data-block-payload)
       - [4. Time Anchor Block Payload](#4-time-anchor-block-payload)
       - [5. Drop Count Block Payload](#5-drop-count-block-payload)
-      - [6. Test Pattern](#6-test-pattern)
+      - [6. Test Pattern - Possibility](#6-test-pattern---possibility)
 
 ## Purpose
 
@@ -479,10 +479,10 @@ This packet will periodically be output if there are any dropped packets.
 | 3     | 4        | Number of dropped warning events.          |
 | 4     | 4        | Number of dropped error events.            |
 
-##### 6. Test Pattern
+##### 6. Test Pattern - Possibility
 
-This specifies the basic information needed to identify the binary
-representation used by the logging machine.
+This is a possible specification to show the basic information needed to
+identify the binary representation used by the logging machine.
 
 All integers are 2's complement and must be 1, 2, 4 or 8 bytes long.  Enums must
 be based on those representations.  Attempting to log anything else will result
