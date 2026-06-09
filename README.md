@@ -183,7 +183,6 @@ There are 3 different control sequences.
    formatting is specified, otherwise it is comma delimited.  This is actually
    dependent on the renderer side, so it could be configurable there.
 
-   ```text
    | byte 1    | byte 2     | byte 3   | byte 4     | byte 5     | byte 6     | byte 7     |
    |-----------|------------|----------|------------|------------|------------|------------|
    | eType     | eFmtLetter |          |            |            |            |            |
@@ -199,7 +198,6 @@ There are 3 different control sequences.
    | Array     | DINT_SIZE  | eType ...|            |            |            |            |
    | Array     | DINT_SIZE  | Array    | DINT_SIZE  | eType ...  |            |            |
    | Array     | DINT_SIZE  | Array    | DINT_SIZE  | Array      | DINT_SIZE  | eType ...  |
-   ```
 
 3. End of an fstring
 
@@ -219,13 +217,11 @@ There are 3 different control sequences.
       prematurely terminate it with an inadvertent NUL. The salt shouldn't be
       printed on the displaying end.
 
-      ```text
       | byte 1    | byte 2        | byte 3   |
       |-----------|---------------|----------|
       | NUL       |               |          |
       | Salt      | NUL           |          |
       | Salt      | DINT_SALT     | NUL      |
-      ```
 
 ##### Ensuring Generated FString CRCs Are Unique
 
