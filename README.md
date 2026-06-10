@@ -489,7 +489,11 @@ dropped.  First, repeated StringBlock and EnumBlock packets will be postponed.
 Then Info packets will be the first to be dropped, then Debug, Warning and
 finally Error.
 
-This packet will periodically be output if there are any dropped packets.
+This packet will be output when any drop/incomplete counter changes.  It will
+also be repeated while any field is non-zero whenever the number of packets sent
+since the last Drop Count Block is a non-zero multiple of `DROP_COUNT_REPEAT`.
+
+All counters are 2-byte unsigned totals and wrap on overflow.
 
 | field | bytes | description                                                |
 | ----: | ----: | ---------------------------------------------------------- |
