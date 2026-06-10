@@ -7,6 +7,7 @@
 - [Dependencies to build](#dependencies-to-build)
 - [VS Code Configuration](#vs-code-configuration)
 - [Design](#design)
+  - [CRC16 Used](#crc16-used)
   - [Type Definitions](#type-definitions)
     - [Dynamic Integers (dint)](#dynamic-integers-dint)
     - [C-String](#c-string)
@@ -25,6 +26,10 @@
       - [4. Time Anchor Block Payload](#4-time-anchor-block-payload)
       - [5. Drop Count Block Payload](#5-drop-count-block-payload)
       - [6. Test Pattern - Possibility](#6-test-pattern---possibility)
+  - [Packet Usage](#packet-usage)
+    - [Life-cycle](#life-cycle)
+    - [Producer Thread](#producer-thread)
+    - [Consumer Thread](#consumer-thread)
 
 ## Purpose
 
@@ -84,6 +89,20 @@ If VS Code still shows stale squiggles after that, reload the window or run
 `C/C++: Reset IntelliSense Database`.
 
 ## Design
+
+### CRC16 Used
+
+The CRC16 algorithm is CRC-16/XMODEM:
+
+```text
+width  = 16
+poly   = 0x1021
+init   = caller-provided seed, default 0x0000
+refin  = false
+refout = false
+xorout = 0x0000
+check  = 0x31C3 for "123456789" with seed 0
+```
 
 ### Type Definitions
 
@@ -263,6 +282,8 @@ That does:
 Then do a second compile with `-DCONCAT_SOURCE_FILES <concat_source_files>` on
 the resulting file.
 
+Possible implementation:
+
 ```cpp
 #include <cstdint>
 
@@ -274,15 +295,8 @@ enum severity {
 };
 
 constexpr std::uint16_t crc16(char const* s) {
-  std::uint16_t h = 0;
-
-  for (; *s; ++s) {
-    h = std::uint16_t(
-      h * 131u + static_cast<unsigned char>(*s)
-    );
-  }
-
-  return h;
+  // ... XMODEM CRC16 algorithm ...
+  return crc16_result;
 }
 
 constexpr std::uint16_t gen_crc(severity sev, char const* s) {
@@ -345,39 +359,44 @@ The short version is:
 
 ### Packet Design
 
-The data is stored in packets with a maximum payload of 256 (I don't see any use
-for an empty packet).  I may make this configurable, but will start with 256
-byte payload.
-
-> **UPDATE:**
->
-> Given my current packet definitions, the minimum payload is 5.  That makes for
-> 5-260 bytes per packet.  4 extra bytes doesn't sound like a lot, but it might
-> be useful.
+The data is stored in packets with a minimum to maximum payload of 5 to 260
+since the smallest packet payload is 5 bytes.
 
 #### General Block Format
 
 | field | bytes | description                                                                    |
-|------:|------:|--------------------------------------------------------------------------------|
-| 1     | 1     | Block type: StringBlock, EnumBlock, DataBlock, TimeAnchorBlock, DropCountBlock |
-| 2     | 1     | Sequence number and continuation flags                                         |
-| 3     | 1     | Payload length minus 5                                                         |
-| 4     | 5-260 | Payload                                                                        |
-| 5     | 2     | CRC16                                                                          |
-| 6     | 4     | Fence                                                                          |
+| ----: | ----: | ------------------------------------------------------------------------------ |
+|     1 |     1 | Block type: StringBlock, EnumBlock, DataBlock, TimeAnchorBlock, DropCountBlock |
+|     2 |     1 | Sequence number and continuation flags                                         |
+|     3 |     1 | Payload length minus 5                                                         |
+|     4 | 5-260 | Payload                                                                        |
+|     5 |     2 | CRC16                                                                          |
+|     6 |     4 | Fence                                                                          |
 
 Fields 1-3 are the header, 4 is the payload, 5 is the CRC and 6 ends the block.
 
 ##### Field 2: Sequence And Continuation Flags
 
-The 6-bit sequence number detects short discontinuities. It is not intended to
-count long loss intervals.
+The 6-bit sequence number identifies packet order in the global reservation
+stream.  Since packets from different producers may be physically interleaved,
+a non-adjacent sequence number does not by itself prove packet loss.  It only
+indicates a possible gap until the reader has enough later packets to determine
+whether the missing sequence number was dropped, delayed, or lost in transfer.
+If packets were actually dropped, then a `Drop Count` packet will be emitted.
+It is not intended to count long loss intervals.
 
-| field | bit   | description                   |
-|------:|------:|-------------------------------|
-| 1     | 0-5   | Sequence number (64 values).  |
-| 2     | 6     | Block continues.              |
-| 3     | 7     | Block is continuing.          |
+| field |  bit | description                  |
+| ----: | ---: | ---------------------------- |
+|     1 |  0-5 | Sequence number (64 values). |
+|     2 |    6 | Block continues.             |
+|     3 |    7 | Block is continuing.         |
+
+| bit 7 | bit 6 | Meaning                            |
+| ----: | ----: | ---------------------------------- |
+|     0 |     0 | single-packet block                |
+|     0 |     1 | first packet of multipacket block  |
+|     1 |     1 | middle packet of multipacket block |
+|     1 |     0 | final packet of multipacket block  |
 
 ##### Field 3: Payload Length
 
@@ -411,13 +430,13 @@ first level, two for the next, etc.
 
 Contains 1 or more strings, with IDs and CRC16 for each.
 
-| repeats | field | bytes    | description                                 |
-|:-------:|------:|---------:|---------------------------------------------|
-|         | 1     | 1        | Count of strings in block.                  |
-|   ✅    | 2     | variable | String ID (dint).                           |
-|   ✅    | 3     | 1        | Severity (Info, Warn, Error, Debug)         |
-|   ✅    | 4     | variable | NUL terminated format string (c-string)     |
-|   ✅    | 5     | 2        | The CRC for the severity and string (CRC16) |
+| repeats | field |    bytes | description                                 |
+| :-----: | ----: | -------: | ------------------------------------------- |
+|         |     1 |        1 | Count of strings in block.                  |
+|    ✅   |     2 | variable | String ID (dint).                           |
+|    ✅   |     3 |        1 | Severity (Info, Warn, Error, Debug)         |
+|    ✅   |     4 | variable | NUL terminated format string (c-string)     |
+|    ✅   |     5 |        2 | The CRC for the severity and string (CRC16) |
 
 The format string contains embedded info that represents the type and how it's
 to be displayed.  Any character with a value less than 32 indicates the start of
@@ -427,11 +446,11 @@ See eType for more information.
 
 ##### 2. Enum Block Payload
 
-| field | bytes     | description                                        |
-|------:|----------:|----------------------------------------------------|
-|  1    | variable  | Enum ID (dint)                                     |
-|  2    | 1         | Underlying enum storage type (eEnumStorageType)    |
-|  3    | variable  | Enum definition bytecode stream                    |
+| field |    bytes | description                                     |
+| ----: | -------: | ----------------------------------------------- |
+|     1 | variable | Enum ID (dint)                                  |
+|     2 |        1 | Underlying enum storage type (eEnumStorageType) |
+|     3 | variable | Enum definition bytecode stream                 |
 
 Field 3 is an enum definition bytecode stream. Its storage type, command set,
 and interpretation rules are specified in [Enum.md](Enum.md).
@@ -440,12 +459,12 @@ and interpretation rules are specified in [Enum.md](Enum.md).
 
 This is the actual logged data.
 
-| field | bytes    | description                                |
-|------:|---------:|--------------------------------------------|
-| 1     | 2        | Timestamp (offset from TimeAnchorBlock)    |
-| 2     | 2        | Event count (rolls over every 64k events)  |
-| 3     | variable | String ID (dint)                           |
-| 4     | variable | Arguments (binary payload based on string) |
+| field |    bytes | description                                |
+| ----: | -------: | ------------------------------------------ |
+|     1 |        2 | Timestamp (offset from TimeAnchorBlock)    |
+|     2 |        2 | Event count (rolls over every 64k events)  |
+|     3 | variable | String ID (dint)                           |
+|     4 | variable | Arguments (binary payload based on string) |
 
 There is only one event per block.
 
@@ -456,9 +475,9 @@ used with the payload.
 
 ##### 4. Time Anchor Block Payload
 
-| field | bytes    | description                                |
-|------:|---------:|--------------------------------------------|
-| 1     | 8        | Timestamp (machine timestamp)              |
+| field | bytes | description                   |
+| ----: | ----: | ----------------------------- |
+|     1 |     8 | Timestamp (machine timestamp) |
 
 This is output periodically to keep the DataBlock's timestamp relevant. Maybe
 every 10 minutes?
@@ -472,12 +491,16 @@ finally Error.
 
 This packet will periodically be output if there are any dropped packets.
 
-| field | bytes    | description                                |
-|------:|---------:|--------------------------------------------|
-| 1     | 4        | Number of dropped debug events.            |
-| 2     | 4        | Number of dropped info events.             |
-| 3     | 4        | Number of dropped warning events.          |
-| 4     | 4        | Number of dropped error events.            |
+| field | bytes | description                                                |
+| ----: | ----: | ---------------------------------------------------------- |
+|     1 |     2 | Total number of dropped info packets.                      |
+|     2 |     2 | Total number of published info, but incomplete packets.    |
+|     3 |     2 | Total number of dropped debug packets.                     |
+|     4 |     2 | Total number of published debug, but incomplete packets.   |
+|     5 |     2 | Total number of dropped warning packets.                   |
+|     6 |     2 | Total number of published warning, but incomplete packets. |
+|     7 |     2 | Total number of dropped error packets.                     |
+|     8 |     2 | Total number of published error, but incomplete packets.   |
 
 ##### 6. Test Pattern - Possibility
 
@@ -524,3 +547,132 @@ bytes.
 | 1     | sizeof(ld) | long double             (negative ∞) **optional** |
 | 1     | sizeof(ld) | long double           (not a number) **optional** |
 | 1     | sizeof(ld) | long double                    (1e7) **optional** |
+
+### Packet Usage
+
+Data spanning multiple packets is guaranteed to reserve contiguous sequence
+numbers.  Packets from a single thread have ascending sequence numbers.
+However, if multiple threads are sending messages, packets from different
+threads may interleave in the output stream.
+
+For example, if thread 1 has data that spans 2 packets and thread 2 has data
+that spans 1 packet, then the output may appear as:
+
+```text
+[ t1:p1, t2:p1, t1:p2 ]
+```
+
+Or as a possible concrete sequence where thread 2 was reserved 3 and thread 1
+was reserved 4 and 5:
+
+```text
+[ 4, 3, 5 ]
+```
+
+The packets for thread 1 still have contiguous sequence numbers, but they are
+not guaranteed to be physically adjacent in the output stream.  This is handled
+by each producer reserving a sequence span before writing the packets.
+
+The sequence field must be wide enough that the global sequence number cannot
+wrap while any earlier reserved sequence number may still be relevant to packet
+ordering, continuation, or drop reporting.
+
+Since each producer can have only one active multipacket reservation at a time,
+the required bound is:
+
+```text
+sum(max_packet_span_per_producer) < 2^sequence_bits
+```
+
+With the current 6-bit sequence field:
+
+```text
+sum(max_packet_span_per_producer) < 64
+```
+
+If all producers use the same maximum packet span, this simplifies to:
+
+```text
+producer_thread_count * max_packet_span < 64
+```
+
+To prevent blocking, each producer thread has its own pool of packets to draw
+from using a circular queue.  The pool should be large enough for the largest
+multipacket set plus enough extra packets to absorb bursts if the consumer is
+not returning packets fast enough.
+
+The consumer queue must be large enough to hold all packet pointers from all
+producer pools, so enqueueing a filled packet pointer cannot fail due to queue
+capacity.
+
+DropCountBlock packets, and all other non-event packets, use dedicated packet
+storage.  They are not dropped because of event-packet pool exhaustion.  They
+may still be suppressed deliberately to reduce output bandwidth.
+
+#### Life-cycle
+
+```text
+producer free queue -> producer -> consumer queue -> consumer -> producer free queue
+```
+
+#### Producer Thread
+
+1. The producer determines how many bytes are needed and calculates how many
+   packets are required.  Since splitting a single value across a packet
+   boundary is allowed, this calculates to:
+
+   ```cpp
+   packet_span = (bytes_needed + payload_size - 1) / payload_size;
+   ```
+
+   `bytes_needed` includes the space needed for the `Timestamp`, `Event count`,
+   `String ID` and `Arguments`.
+
+   The calculation is performed in a type wide enough to represent
+   `bytes_needed + payload_size - 1`; the resulting packet count must fit in the
+   type used for `packet_span`.
+
+   The producer then reserves the next `packet_span` sequence numbers.
+
+2. Set `packets_published` to `0`.
+
+3. If a packet is available from the free queue:
+   1. Extract a packet from the free queue.
+   2. Set the packet's sequence to the next reserved sequence number in
+      `packet_span`.
+   3. Write the packet.
+   4. Send the packet to be consumed by adding it to the consume queue and
+      signalling the consumer.
+   5. Increment `packets_published`.
+   6. If this was not the last packet in the multipacket data, go to step 3.
+      Otherwise, done.
+
+4. Else:
+   1. Let:
+
+      ```cpp
+      packets_dropped = packet_span - packets_published;
+      ```
+
+   2. Add `packets_dropped` to the dropped-packet counter for the packet
+      severity.
+
+   3. If `packets_published != 0`, add `packets_published` to the published but
+      incomplete counter for the packet severity.
+
+   4. Report the updated drop counts to the consumer.
+
+#### Consumer Thread
+
+1. Wait for a packet or drop-count report to be ready to consume.
+
+2. If a packet is ready:
+   1. Send packet.
+   2. Reset packet's sequence/continue markers, write pointer/length to an empty
+      packet state.
+   3. Put packet in the free queue.
+
+3. If the invalid/dropped count has changed:
+   1. Report the new drop count.
+
+4. Go to step 1.
