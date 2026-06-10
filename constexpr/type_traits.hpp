@@ -169,6 +169,18 @@ namespace Constexpr {
    */
   template<class... Ts> overload(Ts...) -> overload<Ts...>;
 
+  /**
+  * @brief Tests that type \p T is a byte in size.
+  * 
+  * @tparam T - Type to check.
+  */
+  template <typename T>
+  inline constexpr bool is_byte_like_v =
+    std::is_same_v<std::remove_cv_t<T>, char> ||
+    std::is_same_v<std::remove_cv_t<T>, signed char> ||
+    std::is_same_v<std::remove_cv_t<T>, unsigned char> ||
+    std::is_same_v<std::remove_cv_t<T>, std::byte>;
+
 } // namespace Constexpr
 
 #endif // TYPE_TRAITS_HPP

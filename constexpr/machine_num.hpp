@@ -22,6 +22,7 @@
 #include <type_traits>
 #include <stdexcept>
 #include "ThrowNoThrow.hpp"
+#include "byte_range.hpp"
 
 ////////////////////////////////////////////////////////////////////////////////
 // Store one or more numbers or enums
@@ -34,16 +35,20 @@
  * The caller must provide enough space to store all \p M values.  This
  * function asserts if the destination range is too small.
  *
- * @tparam T - Type being stored.
+ * @tparam T   - Type being stored; must be an enum or arithmetic type.
+ * @tparam ItB - Writable iterator type for the destination range.
+ * @tparam ItE - End-sentinel type for the destination range.
  * @param dst_begin_it - First destination byte to write.
  * @param dst_end_it - One-past-the-end of the destination range.
  * @param v_src - Pointer to value(s) to encode.
  * @param M - Number of values to encode.
- * @return Pointer one past the last byte written.
+ * @return Iterator one past the last byte written.
  */
-template <typename T
-  , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
-std::byte* encode_value(std::byte* dst_begin_it, [[maybe_unused]] std::byte* const dst_end_it, T const* v_src, std::size_t M) {
+template <typename T, typename ItB, typename ItE>
+ItB encode_value(ItB dst_begin_it, ItE const dst_end_it, T const* v_src, std::size_t M) {
+  Require::byte_like_read_write_range(dst_begin_it, dst_end_it);
+  static_assert(std::is_enum_v<T> || std::is_arithmetic_v<T>, "Must be an enum or number.");
+
   assert(M >= 1);
   std::size_t const length{ sizeof(T) * M };
   assert(dst_begin_it + length <= dst_end_it || !"Not enough space to store in buffer");
@@ -58,15 +63,16 @@ std::byte* encode_value(std::byte* dst_begin_it, [[maybe_unused]] std::byte* con
  * The caller must provide enough space to store the value.  This function
  * asserts if the destination range is too small.
  *
- * @tparam T - Type being stored.
+ * @tparam T   - Type being stored; must be an enum or arithmetic type.
+ * @tparam ItB - Writable iterator type for the destination range.
+ * @tparam ItE - End-sentinel type for the destination range.
  * @param dst_begin_it - First destination byte to write.
  * @param dst_end_it - One-past-the-end of the destination range.
  * @param v_src - Value to encode.
- * @return Pointer one past the last byte written.
+ * @return Iterator one past the last byte written.
  */
-template <typename T
-  , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
-std::byte* encode_value(std::byte* dst_begin_it, std::byte* const dst_end_it, T const& v_src) {
+template <typename T, typename ItB, typename ItE>
+ItB encode_value(ItB dst_begin_it, ItE const dst_end_it, T const& v_src) {
   return encode_value(dst_begin_it, dst_end_it, &v_src, 1);
 }
 
@@ -83,20 +89,29 @@ std::byte* encode_value(std::byte* dst_begin_it, std::byte* const dst_end_it, T 
  *
  * @tparam Throws - \c Throw to throw on decode errors; \c NoThrow to restore
  *   \p src_begin_it and leave \p v_dst unchanged on failure.
- * @tparam T - Type of number or enum to decode.
- * @param src_begin_it - Reference to the first unread source byte.  Updated to
- *   the next unread byte on success; restored to its initial value on
+ * @tparam T   - Type of number or enum to decode; must be an enum or
+ *   arithmetic type.
+ * @tparam ItB - Iterator type for the source range.
+ * @tparam ItE - Element type that the end sentinel points to.  The end
+ *   sentinel parameter has type \c ItE \c const*, so \c ItE is deduced as
+ *   the element type (e.g. \c std::byte), not the pointer type.
+ * @param src_begin_it - Reference to the first unread source byte.  Advanced
+ *   to the next unread byte on success; restored to its initial value on
  *   \c NoThrow failure.
- * @param src_end_it - One-past-the-end of the source range.
- * @param v_dst - Destination for decoded value(s).  Not updated on failure.
+ * @param src_end_it - Pointer to one-past-the-end of the source range
+ *   (type \c ItE \c const*).
+ * @param v_dst - Destination array for decoded values.  Not updated on
+ *   failure.
  * @param M - Number of values to decode.
- * @return T& - \p v_dst[0].
+ * @return T& - Reference to \p v_dst[0].
  * @throws std::overflow_error if the values do not fit in the source range
  *   (\c Throw mode only).
  */
-template <typename Throws, typename T
-  , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
-T& decode_value(std::byte const*& src_begin_it, std::byte const* const src_end_it, T* v_dst, std::size_t M) {
+template <typename Throws, typename T, typename ItB, typename ItE>
+T& decode_value(ItB& src_begin_it, ItE const* const src_end_it, T* v_dst, std::size_t M) {
+  Require::byte_like_readable_range(src_begin_it, src_end_it);
+  static_assert(std::is_enum_v<T> || std::is_arithmetic_v<T>, "Must be an enum or number.");
+
   assert(M >= 1);
   std::size_t const length{ sizeof(T) * M };
   auto const init_begin_it{ src_begin_it };
@@ -121,19 +136,22 @@ T& decode_value(std::byte const*& src_begin_it, std::byte const* const src_end_i
  *
  * @tparam Throws - \c Throw to throw on decode errors; \c NoThrow to restore
  *   \p src_begin_it and leave \p v_dst unchanged on failure.
- * @tparam T - Type of number or enum to decode.
- * @param src_begin_it - Reference to the first unread source byte.  Updated to
- *   the next unread byte on success; restored to its initial value on
+ * @tparam T   - Type of number or enum to decode; must be an enum or
+ *   arithmetic type.
+ * @tparam ItB - Iterator type for the source range.
+ * @tparam ItE - End-sentinel type for the source range (the pointer type,
+ *   e.g. \c std::byte*).
+ * @param src_begin_it - Reference to the first unread source byte.  Advanced
+ *   to the next unread byte on success; restored to its initial value on
  *   \c NoThrow failure.
  * @param src_end_it - One-past-the-end of the source range.
- * @param v_dst - Destination for decoded value.  Not updated on failure.
- * @return T& - \p v_dst.
+ * @param v_dst - Destination for the decoded value.  Not updated on failure.
+ * @return T& - Reference to \p v_dst.
  * @throws std::overflow_error if the value does not fit in the source range
  *   (\c Throw mode only).
  */
-template <typename Throws, typename T
-  , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
-T& decode_value(std::byte const*& src_begin_it, std::byte const* const src_end_it, T& v_dst) {
+template <typename Throws, typename T, typename ItB, typename ItE>
+T& decode_value(ItB& src_begin_it, ItE const src_end_it, T& v_dst) {
   return decode_value<Throws>(src_begin_it, src_end_it, &v_dst, 1);
 }
 
@@ -145,17 +163,19 @@ T& decode_value(std::byte const*& src_begin_it, std::byte const* const src_end_i
  *
  * @tparam Throws - \c Throw to throw on decode errors; \c NoThrow to restore
  *   \p src_begin_it and return a default-initialized value on failure.
- * @tparam T - Type of number or enum to decode.
- * @param src_begin_it - Reference to the first unread source byte.  Updated to
- *   the next unread byte on success; restored to its initial value on
+ * @tparam T - Type of number or enum to decode; must be an enum or arithmetic
+ *   type.  Must be specified explicitly — it cannot be deduced from the
+ *   arguments.
+ * @param src_begin_it - Reference to the first unread source byte.  Advanced
+ *   to the next unread byte on success; restored to its initial value on
  *   \c NoThrow failure.
  * @param src_end_it - One-past-the-end of the source range.
- * @return T - The decoded value, or default-initialized on \c NoThrow failure.
+ * @return T - The decoded value, or a default-initialized \c T on
+ *   \c NoThrow failure.
  * @throws std::overflow_error if the value does not fit in the source range
  *   (\c Throw mode only).
  */
-template <typename Throws, typename T
-  , std::enable_if_t<std::is_enum_v<T> || std::is_arithmetic_v<T>, bool> = true>
+template <typename Throws, typename T>
 T decode_value(std::byte const*& src_begin_it, std::byte const* const src_end_it) {
   T v_dst{};
   decode_value<Throws>(src_begin_it, src_end_it, &v_dst, 1);

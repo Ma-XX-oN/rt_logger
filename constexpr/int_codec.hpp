@@ -62,6 +62,7 @@
 #include <iterator>
 #include <type_traits>
 #include "type_traits.hpp"
+#include "byte_range.hpp"
 #include <cstddef>
 #include <stdexcept>
 #include <cassert>
@@ -71,18 +72,6 @@
 #include "bit.hpp"
 
 namespace Constexpr {
-
-/**
- * @brief Tests that type \p T is a byte in size.
- * 
- * @tparam T - Type to check.
- */
-template <typename T>
-inline constexpr bool is_byte_like_v =
-  std::is_same_v<std::remove_cv_t<T>, char> ||
-  std::is_same_v<std::remove_cv_t<T>, signed char> ||
-  std::is_same_v<std::remove_cv_t<T>, unsigned char> ||
-  std::is_same_v<std::remove_cv_t<T>, std::byte>;
 
 /**
  * @brief Cast \b value to a \c std::uint8_t type.
@@ -123,31 +112,19 @@ constexpr std::uint8_t u8(std::byte value) {
  * @return ItB - Iterator one past the last byte written.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr ItB encode_int(ItB dst_begin_it, [[maybe_unused]] ItE const dst_end_it, T value) {
+constexpr ItB encode_int(ItB dst_begin_it, ItE const dst_end_it, T value) {
+  Require::byte_like_read_write_range(dst_begin_it, dst_end_it);
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
     !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
     "Signed int_codec types require two's-complement representation"
   );
-  static_assert(
-    std::numeric_limits<unsigned char>::digits == 8,
-    "int_codec requires 8-bit byte storage"
-  );
-
-  static_assert(Constexpr::is_bidirectional<ItB>, "dst_begin_it must be a bidirectional iterator");
-  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "dst_end_it must be a sentinel for dst_begin_it");
-
-  using ItVT = typename std::iterator_traits<ItB>::value_type;
-  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
-
-  using Ref = decltype(*std::declval<ItB&>());
-  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
-  static_assert(std::is_assignable_v<Ref, ItVT>, "Iterator must be writable");
   //////////////////////////////////////////////////////////////////////////////////////////////////
-
+  
   using UT = std::make_unsigned_t<T>;
   UT uvalue{ static_cast<UT>(value) };
+  using ItVT = typename std::iterator_traits<ItB>::value_type;
   auto to_itv = [] (std::uint8_t v) { return static_cast<ItVT>(v); };
 
   for (std::size_t i{ 0 }; i < sizeof(T); ++i) {
@@ -177,26 +154,14 @@ constexpr ItB encode_int(ItB dst_begin_it, [[maybe_unused]] ItE const dst_end_it
  * @return T& - \p v_dst.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr T& decode_int(T& v_dst, ItB& src_begin_it, [[maybe_unused]] ItE src_end_it) {
+constexpr T& decode_int(T& v_dst, ItB& src_begin_it, ItE src_end_it) {
+  Require::byte_like_readable_range(src_begin_it, src_end_it);
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
     !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
     "Signed int_codec types require two's-complement representation"
   );
-  static_assert(
-    std::numeric_limits<unsigned char>::digits == 8,
-    "int_codec requires 8-bit byte storage"
-  );
-
-  static_assert(Constexpr::is_bidirectional<ItB>, "src_begin_it must be a bidirectional iterator");
-  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "src_end_it must be a sentinel for src_begin_it");
-
-  using ItVT = typename std::iterator_traits<ItB>::value_type;
-  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
-
-  using Ref = decltype(*std::declval<ItB&>());
-  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
   //////////////////////////////////////////////////////////////////////////////////////////////////
 
   using UT = std::make_unsigned_t<T>;
@@ -253,27 +218,14 @@ constexpr T decode_int(ItB& src_begin_it, ItE src_end_it) {
  * @return Iterator one past the last byte written.
  */
 template <typename T, typename ItB, typename ItE>
-constexpr ItB encode_dint(ItB dst_begin_it, [[maybe_unused]] ItE const dst_end_it, T v_src) {
+constexpr ItB encode_dint(ItB dst_begin_it, ItE const dst_end_it, T v_src) {
+  Require::byte_like_read_write_range(dst_begin_it, dst_end_it);
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
     !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
     "Signed dint types require two's-complement representation"
   );
-  static_assert(
-    std::numeric_limits<unsigned char>::digits == 8,
-    "dynamic_int requires 8-bit byte-like storage"
-  );
-
-  static_assert(Constexpr::is_bidirectional<ItB>, "dst_begin_it must be a bidirectional iterator");
-  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "dst_end_it must be a sentinel for dst_begin_it");
-  
-  using ItVT = typename std::iterator_traits<ItB>::value_type;
-  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
-
-  using Ref = decltype(*std::declval<ItB&>());
-  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
-  static_assert(std::is_assignable_v<Ref, ItVT>, "Iterator must be writable");
   //////////////////////////////////////////////////////////////////////////////////////////////////
 
   using UT = std::make_unsigned_t<T>;
@@ -281,6 +233,7 @@ constexpr ItB encode_dint(ItB dst_begin_it, [[maybe_unused]] ItE const dst_end_i
     [] (std::byte v) { return std::to_integer<UT>(v); },
     [] (auto v)      { return     static_cast<UT>(v); },
   };
+  using ItVT = typename std::iterator_traits<ItB>::value_type;
   auto to_itv = [] (auto v) { return static_cast<ItVT>(v); };
 
   UT v{ to_uint(v_src) };
@@ -418,25 +371,14 @@ constexpr auto encode_dint() {
  */
 template <typename Throws, typename T, typename ItB, typename ItE>
 constexpr T& decode_dint(T& v_dst, ItB& src_begin_it, ItE src_end_it) {
+  Require::byte_like_readable_range(src_begin_it, src_end_it);
+
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   static_assert(!std::is_same_v<T, bool>, "T must not be bool");
   static_assert(
     !std::is_signed_v<T> || std::numeric_limits<T>::min() == -std::numeric_limits<T>::max() - 1,
     "Signed dint types require two's-complement representation"
   );
-  static_assert(
-    std::numeric_limits<unsigned char>::digits == 8,
-    "dynamic_int requires 8-bit byte-like storage"
-  );
-
-  static_assert(Constexpr::is_bidirectional<ItB>, "src_begin_it must be a bidirectional iterator");
-  static_assert(Constexpr::is_sentinel_for_v<ItE, ItB>, "src_end_it must be a sentinel for src_begin_it");
-  
-  using ItVT = typename std::iterator_traits<ItB>::value_type;
-  static_assert(is_byte_like_v<ItVT>, "Iterator value_type must be byte-like");
-
-  using Ref = decltype(*std::declval<ItB&>());
-  static_assert(std::is_convertible_v<Ref, ItVT>, "Iterator must be readable");
   //////////////////////////////////////////////////////////////////////////////////////////////////
 
   using UT = std::make_unsigned_t<T>;
